@@ -1,0 +1,22 @@
+# This is a basic workflow to build robot code.
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    # The 2026 toolchains are the same as 2025, so the 2025 cross-build image is the 2026 image.
+    container: wpilib/roborio-cross-ubuntu:2025-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Add repository to git safe directories
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+      - name: Grant execute permission
+        run: chmod +x gradlew
+      - name: Build robot code
+        run: ./gradlew build
