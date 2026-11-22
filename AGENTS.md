@@ -135,7 +135,8 @@ elevator are 91.6 mm (turret) and 36.8 mm (hood); seated joints such as the bear
 yaw ring may touch, but nothing may interpenetrate.
 
 **It also copies the set into `%APPDATA%\AdvantageScope\userAssets\Robot_BlockBot`, the only folder the
-viewer reads. Regenerate after every geometry edit and restart AdvantageScope, which caches models per
+viewer reads; `scripts/sim.ps1` performs the same mirror on every run, so a fresh clone draws the robot
+without running the generator. Regenerate after every geometry edit and restart AdvantageScope, which caches models per
 session — editing the repo assets alone leaves the viewer drawing stale geometry against the new poses,
 which looks exactly like parts colliding or floating off their pivots.**
 

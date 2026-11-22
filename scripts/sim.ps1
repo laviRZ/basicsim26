@@ -17,4 +17,13 @@ $root = Split-Path -Parent $PSScriptRoot
 $jdk = Resolve-WpilibJavaHome -Root $root
 if ($jdk) { $env:JAVA_HOME = $jdk }
 
+# AdvantageScope only reads models from its own user assets folder. Mirror the committed model so
+# a fresh clone draws the robot without running tools/build_block_bot.py.
+$assets = Join-Path $root 'assets\Robot_BlockBot'
+if ($env:APPDATA -and (Test-Path -LiteralPath $assets)) {
+    $userAssets = Join-Path $env:APPDATA 'AdvantageScope\userAssets\Robot_BlockBot'
+    New-Item -ItemType Directory -Force -Path $userAssets | Out-Null
+    Copy-Item -Path (Join-Path $assets '*') -Destination $userAssets -Recurse -Force
+}
+
 exit (Invoke-WpilibGradle -Root $root -GradleArgs (@('simulateJava', '-PsimGui', '--console=plain') + $args))
