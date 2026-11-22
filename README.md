@@ -10,7 +10,7 @@ This page goes from a fresh clone to the stage-1 roller spinning.
 
 ## What you need
 
-- WPILib **2026** with VS Code. It installs Java, Gradle, the WPILib simulator, and AdvantageScope.
+- WPILib **2026** with VS Code. It installs Java, the WPILib simulator, and AdvantageScope.
 - A terminal. The helper scripts are PowerShell.
 
 ## 1. Build
