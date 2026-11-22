@@ -15,10 +15,9 @@ loop. Every joint with somewhere to be — elevator, intake frame, hood, turret 
 | `Motors` | no | the robot's physical world: one described motor per joint |
 | `RobotPhysics` | no | the plant in one unit-typed table: gearing, inertia, mass, gravity |
 | `BlockBot` | no | draws the robot; you never touch a pose |
-| `Robot` | edit one line per stage | constructs mechanisms, registers drawers, binds buttons |
+| `Robot` | edit | constructs mechanisms, registers drawers, binds buttons |
 | `subsystems/<name>/<Name>Constants.java` | tune | unit-typed travel and voltage; gains |
 | `Constants` | no | robot-wide values: loop period, controller port |
-| `subsystems/roller/Roller.java` | stage 1 solution | compare yours against it |
 | `assets/Robot_BlockBot/` | no | the 3D model |
 
 There is no hardware layer, no IO interface, no replay. A mechanism owns its motors and its state, and
@@ -47,7 +46,7 @@ and you do not touch that either. The motor advances itself once per loop, so yo
 
 ## The pattern
 
-Every mechanism is the same three pieces. The stage 1 solution has all of them:
+Every mechanism is the same three pieces:
 
 1. `implements Subsystem`, owns its motor as a field.
 2. A command sets voltage; `finallyDo` stops the motor when the command ends or is interrupted.
@@ -135,14 +134,12 @@ does not move.
 
 ## Stage 1 — Roller
 
-Write `src/main/java/first/robot/subsystems/roller/Roller.java`. The `Roller.java` here is the
-solution — write yours first, then compare.
+Write `src/main/java/first/robot/subsystems/roller/Roller.java`.
 
 - `Motors.feederRoller()`, driven open loop at `RollerConstants.VOLTAGE`.
 - `runCommand()` sets the voltage every loop and stops the motor in `finallyDo`, named `"Roller.Run"`.
 - Expose `getSpinRadians()` and register it: `m_blockBot.trackFeeder(m_roller::getSpinRadians);`.
-- Post `Roller/PositionRadians` and `Roller/VelocityRadiansPerSecond` from `periodic()` (the solution
-  has it).
+- Post `Roller/PositionRadians` and `Roller/VelocityRadiansPerSecond` from `periodic()`.
 - Bind it to A: `RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(...)`.
 
 Done when: holding A spins the roller up — you can see the ramp — and releasing it coasts down.

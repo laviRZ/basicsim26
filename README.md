@@ -6,7 +6,7 @@ physics, and a 3D view of every joint in AdvantageScope. Nothing is plugged in.
 ![Block Bot in AdvantageScope](docs/images/ascope-3d.png)
 
 The five exercises — roller, elevator, intake, hood, turret — are in [EXERCISES.md](EXERCISES.md).
-This page goes from a fresh clone to the stage-1 roller spinning.
+This page gets the simulator and the 3D view running; then you write the first stage.
 
 ## What you need
 
@@ -36,14 +36,7 @@ A **Robot Simulation** window opens. Before driving:
 
 ![Sim GUI with Teleoperated selected and Keyboard 0 assigned](docs/images/sim-teleop.png)
 
-`Keyboard 0` turns four keys into controller buttons:
-
-| Key | Xbox button | Bound command |
-|---|---|---|
-| **Z** | A | `Roller.runCommand()` |
-| **X** | B | unbound |
-| **C** | X | `Elevator.goTo(MAX_HEIGHT)` |
-| **V** | Y | `Elevator.goTo(MIN_HEIGHT)` |
+`Keyboard 0` turns four keys into controller buttons: **Z** is A, **X** is B, **C** is X, **V** is Y.
 
 ## 3. Add the 3D view
 
@@ -57,27 +50,32 @@ tab is now saved.
 
 ![Block Bot 3D tab](docs/images/ascope-3d.png)
 
-## 4. Hold Z
+## 4. Write the roller
 
-Z is the A button. `Robot` binds it to the roller, so holding it applies
-`RollerConstants.VOLTAGE` every loop; releasing it stops the motor.
+Add `src/main/java/first/robot/subsystems/roller/Roller.java`: the roller's motor, its command, and
+`getSpinRadians()`.
 
-To watch the numbers, add a **Line Graph** tab (`Alt+G`), drag **Roller → PositionRadians** and
-**Roller → VelocityRadiansPerSecond** into it, then hold Z for a few seconds:
+Then in `Robot.java`:
+
+- construct the roller beside `m_blockBot`,
+- register its pose with `m_blockBot.trackFeeder(m_roller::getSpinRadians);`,
+- bind its command in `configureButtonBindings()`:
+
+```java
+RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
+```
+
+[EXERCISES.md](EXERCISES.md) stage 1 has the details.
+
+## 5. Check it works
+
+Hold **Z**. With a **Line Graph** tab (`Alt+G`) showing **Roller → PositionRadians** and
+**Roller → VelocityRadiansPerSecond**, it should look like this:
 
 ![Roller position and velocity while Z is held](docs/images/ascope-graph.png)
 
 Velocity jumps to about 105 rad/s while you hold Z, and position climbs steadily. Release Z: the
 velocity falls back and the position flattens.
-
-## Where to write code
-
-| File | What it is |
-|---|---|
-| `Motor.java`, `Motors.java`, `RobotPhysics.java` | the motor and the robot's physical plant — given |
-| `BlockBot.java` | the 3D poses — given |
-| `Robot.java` | constructs each mechanism, registers its pose, binds buttons |
-| `subsystems/<name>/` | your subsystem, its commands, and its constants |
 
 ## If something does not work
 

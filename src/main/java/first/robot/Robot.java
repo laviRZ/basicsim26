@@ -2,10 +2,6 @@ package first.robot;
 
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
-import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
-import first.robot.subsystems.elevator.Elevator;
-import first.robot.subsystems.elevator.ElevatorConstants;
-import first.robot.subsystems.roller.Roller;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.networktables.NT4Publisher;
@@ -14,27 +10,20 @@ import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 /**
  * Robot container: owns the mechanisms, publishes telemetry, and binds driver buttons.
  *
- * <p><b>Infrastructure.</b> The logging setup is written for you and no exercise requires changing
- * it. To add a mechanism, construct it beside the roller, register what it should draw, and bind
- * one of its commands in {@link #configureButtonBindings()}.
+ * <p>Start with {@code subsystems/roller/Roller.java}: add the roller, construct it beside {@code
+ * m_blockBot}, register it with {@code m_blockBot.trackFeeder(m_roller::getSpinRadians)}, and bind
+ * its command in {@link #configureButtonBindings()}.
  *
- * <p>Every loop, in this order: the scheduler runs each subsystem's periodic method — first the
- * motor that steps its physics, then the mechanism that logs its state, in registration order —
- * then polls triggers and runs commands. Finally {@link BlockBot} samples the mechanisms and
- * publishes their poses.
+ * <p>Every loop, in this order: the scheduler runs each subsystem's periodic method — the motor
+ * steps its physics, then the mechanism logs its state — then polls triggers and runs commands.
+ * Finally {@link BlockBot} samples the mechanisms and publishes their poses.
  */
 public class Robot extends LoggedRobot {
   private final BlockBot m_blockBot = new BlockBot();
-  private final Roller m_roller = new Roller();
-  private final Elevator m_elevator = new Elevator();
   private final CommandXboxController m_driverController =
       new CommandXboxController(Constants.Driver.CONTROLLER_PORT);
 
   public Robot() {
-    // Register what each mechanism should draw. One line per mechanism; no geometry here.
-    m_blockBot.trackFeeder(m_roller::getSpinRadians);
-    m_blockBot.trackCarriage(m_elevator::getHeightMeters);
-
     this.configureButtonBindings();
 
     // Record metadata
@@ -60,26 +49,14 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * Binds the roller to the Xbox controller's A button and the elevator to X and Y, in teleop only.
-   * Held, not toggled: releasing the button cancels the command, and the cancel clears the
-   * commanded voltage.
+   * Binds driver buttons. This is where a mechanism's commands go; the stage 1 binding runs the
+   * roller while A is held:
    *
-   * <p>Trigger bindings are polled on the scheduler's default button loop every loop, disabled
-   * included, so the composed condition itself carries the mode. {@code teleop()} is {@code
-   * isTeleopEnabled()} — mode and enabled — so the condition falls on disable and rises again when
-   * teleop is re-enabled while the button is held; {@code whileTrue} cancels on the fall and
-   * schedules on the rise. That is what makes a held button resume after a disable, with no
-   * separate retry modifier.
+   * <pre>{@code
+   * RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
+   * }</pre>
    */
-  private void configureButtonBindings() {
-    RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
-    RobotModeTriggers.teleop()
-        .and(m_driverController.x())
-        .whileTrue(m_elevator.goTo(ElevatorConstants.MAX_HEIGHT));
-    RobotModeTriggers.teleop()
-        .and(m_driverController.y())
-        .whileTrue(m_elevator.goTo(ElevatorConstants.MIN_HEIGHT));
-  }
+  private void configureButtonBindings() {}
 
   /** This function is called periodically during all modes. */
   @Override
