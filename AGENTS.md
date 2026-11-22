@@ -100,9 +100,10 @@ means adding a factory in `Motor`.
 - Source keys are `/RealOutputs/<Key>` — no `NT:` prefix and no `AdvantageKit` segment — and that form
   works for both the live NT source and a `.wpilog` opened from `logs/`. `NT:/AdvantageKit/RealOutputs/...`
   resolves to nothing in either mode.
-- `Robot/Pose` is published every loop. A constant pose is fine live: AdvantageScope subscribes with
-  periodic resend, so the NT4 server keeps streaming the last value. In a log the pose has a single
-  sample, so advance the playhead off `0s` before the first sample.
+- `Robot/Pose` is published every loop at a point inside the field (the field origin is the driver
+  station corner, where the model would intersect the wall). A constant pose is fine live: AdvantageScope
+  subscribes with periodic resend, so the NT4 server keeps streaming the last value. In a log the pose
+  has a single sample, so advance the playhead off `0s` before the first sample.
 - The 3D tab is **two sources, not seven**: robot `/RealOutputs/Robot/Pose` (`Pose3d`, model `Block
   Bot` — the config `name`, not the folder) and one component `/RealOutputs/BlockBot/Poses`
   (`Pose3d[]`). Component pose `i` drives `model_i.glb`; per-component sources are neither needed

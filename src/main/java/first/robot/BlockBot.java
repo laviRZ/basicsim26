@@ -34,6 +34,12 @@ public final class BlockBot {
    */
   private static final String ROBOT_POSE_KEY = "Robot/Pose";
 
+  /**
+   * Where the robot stands on the field. The field origin is the driver station corner, where the
+   * model would intersect the wall, so it is placed a few metres inside instead.
+   */
+  private static final Pose3d ROBOT_POSE = new Pose3d(4.0, 4.0, 0.0, Rotation3d.kZero);
+
   /** Where each joint sits in the model's zero configuration. */
   private static final double FEEDER_X = 0.23;
 
@@ -102,7 +108,7 @@ public final class BlockBot {
           new Transform3d(0, 0, HOOD_OFFSET_Z, new Rotation3d(0, m_hoodPitch.getAsDouble(), 0)))
     };
 
-    Logger.recordOutput(ROBOT_POSE_KEY, Pose3d.kZero);
+    Logger.recordOutput(ROBOT_POSE_KEY, ROBOT_POSE);
     Logger.recordOutput(POSES_KEY, poses);
   }
 }
