@@ -158,14 +158,21 @@ The script validates each GLB by reading its buffers back (bounds, unit normals,
 and proves turret/hood clearance rather than estimating it: yaw is unlimited, so only radius and height
 about the yaw axis matter, and it intersects each moving part's convex `(r, z)` profile with every
 static part's and the carriage's `(r, z)` box (separating-axis test). Current worst margins to the
-elevator are 91.6 mm (turret) and 36.8 mm (hood); seated joints such as the bearing collar under the
+elevator are 68.7 mm (turret) and 36.8 mm (hood); seated joints such as the bearing collar under the
 yaw ring may touch, but nothing may interpenetrate. Swerve modules steer without limit too, so each pod
 and wheel's swept disc is checked against every static part, the carriage over its travel and the
 feeder roller; the worst margin is 5.8 mm (a wheel to a side rail). The hood is also checked against
-the turret it rides on: at every pitch, no hood vertex may dip into the turret disc or its front block,
+the turret it rides on: at every pitch, no hood vertex may dip into the turret disc or its front tab,
 which is why the hood pivot sits on tall cheeks. Parts that share a joint are not otherwise checked, so
 when editing a child part (the intake roller in its frame, a roller between its bearings) keep its ends
 and radius clear of its parent by hand.
+
+Within each GLB, `check_static` holds parts to butt joints: two parts may touch, and one may hide
+entirely inside another, but none may poke into another (its crossing edges show) or share a
+same-facing face with it (the two flicker as the renderer alternates). So the deck rests on the rails,
+the side rails run between the front and rear rails, uprights stand on the deck under the crossbar,
+and rollers and wheels show their spin with `striped()` wedges of alternating colour rather than
+boxes pushed through a cylinder. Build new parts the same way.
 
 **It also copies the set into `%APPDATA%\AdvantageScope\userAssets\Robot_BlockBot`, the only folder the
 viewer reads; `scripts/sim.ps1` performs the same mirror on every run, so a fresh clone draws the robot
