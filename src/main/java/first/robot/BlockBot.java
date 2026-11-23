@@ -48,7 +48,7 @@ public final class BlockBot {
   /** Where each joint sits in the model's zero configuration. */
   private static final double FEEDER_X = 0.23;
 
-  private static final double FEEDER_Z = 0.20;
+  private static final double FEEDER_Z = 0.21;
   private static final double CARRIAGE_X = -0.28;
   private static final double CARRIAGE_Z0 = 0.24;
   private static final double INTAKE_X = 0.30;
@@ -56,7 +56,7 @@ public final class BlockBot {
   private static final double INTAKE_ROLLER_OFFSET_X = 0.32;
   private static final double TURRET_X = -0.02;
   private static final double TURRET_Z = 0.30;
-  private static final double HOOD_OFFSET_Z = 0.07;
+  private static final double HOOD_OFFSET_Z = 0.09;
   private static final double WHEEL_Z = RobotPhysics.Drive.WHEEL_RADIUS.in(Meters);
 
   private DoubleSupplier m_feederSpin = () -> 0.0;

@@ -259,9 +259,9 @@ def main():
         base.append(box(.06, .025, .09, (.23, sign * .16, .21), dark))              # feeder bearings
     base.extend(elevator_static)
     models = [base,
-              [cylinder(.04, .32, "y", origin, "#EB8936"),
-               box(.088, .322, .014, origin, "#FFF0D6"),
-               box(.014, .322, .088, origin, "#9E4F14")],
+              [cylinder(.04, .293, "y", origin, "#EB8936"),        # ends 1 mm off the bearings
+               box(.088, .293, .014, origin, "#FFF0D6"),
+               box(.014, .293, .088, origin, "#9E4F14")],
               [box(.07, .28, .12, origin, "#5B8FF9"),
                box(.07, .04, .12, (0, -.14, 0), "#3B6FD4"),
                box(.07, .04, .12, (0, .14, 0), "#3B6FD4"),
@@ -269,17 +269,19 @@ def main():
               [box(.34, .03, .035, (.17, -.225, 0), "#3FB950"),
                box(.34, .03, .035, (.17, .225, 0), "#3FB950"),
                box(.03, .45, .03, (.03, 0, .005), "#2EA043"),
-               box(.03, .45, .03, (.31, 0, .005), "#2EA043"),
+               box(.03, .45, .03, (.26, 0, .005), "#2EA043"),       # clear of the roller
                box(.10, .025, .05, (.28, -.24, 0), "#2EA043"),
                box(.10, .025, .05, (.28, .24, 0), "#2EA043"),
                cylinder(.025, .47, "y", origin, "#2EA043")],
-              [cylinder(.035, .44, "y", origin, "#1F9E59"),
-               box(.076, .442, .012, origin, "#A7F3D0"),
-               box(.012, .442, .076, origin, "#0F5330")],
-              [cylinder(.115, .06, "z", origin, "#D2A8FF"),
-               box(.08, .025, .075, (0, -.07, .05), "#B388EB"),
-               box(.08, .025, .075, (0, .07, .05), "#B388EB"),
-               box(.06, .06, .045, (.10, 0, 0), "#9B6BDF")],
+              [cylinder(.035, .418, "y", origin, "#1F9E59"),       # ends 1 mm off the rails
+               box(.076, .418, .012, origin, "#A7F3D0"),
+               box(.012, .418, .076, origin, "#0F5330")],
+              # Turret: a low disc on the bearing collar, with cheeks rising to the hood's pivot
+              # so the barrel clears the disc at full depression.
+              [cylinder(.115, .02, "z", (0, 0, -.02), "#D2A8FF"),
+               box(.08, .025, .13, (0, -.07, .055), "#B388EB"),
+               box(.08, .025, .13, (0, .07, .055), "#B388EB"),
+               box(.06, .06, .02, (.10, 0, -.02), "#9B6BDF")],
               [box(.10, .11, .08, (.005, 0, 0), "#F778BA"),
                cylinder(.05, .16, "x", (.085, 0, 0), "#F778BA"),
                cylinder(.055, .03, "x", (.165, 0, 0), "#DB61A2"),
@@ -302,7 +304,7 @@ def main():
     # hand-derived radius -- an approximate radius is how a barrel ends up inside the elevator.
     # models[0] is the static base; the rest follow config.json component order.
     feeder, carriage, intake_frame, intake_roller, turret, hood = models[1:7]
-    turret_xy, turret_z, hood_lift = (-.02, 0), .30, .07
+    turret_xy, turret_z, hood_lift = (-.02, 0), .30, .09
     pitch_limit = math.radians(15)
     obstacles = [(f"base part {i}", bounds(p.positions), 0.0) for i, p in enumerate(base)]
     obstacles += [(f"elevator part {i}", bounds(p.positions), .005)
@@ -326,12 +328,26 @@ def main():
                 f"{label} can touch {name}: profile overlap {-gap * 1000:.1f} mm")
         print(f"{label}: swept profile clears every obstacle, worst margin "
               f"{worst[0] * 1000:.1f} mm to {worst[1]}")
+    # The hood pitches over the turret's disc and front block: at every pitch, every hood vertex
+    # above one of them (by its bounds, a superset of a cylinder's footprint) must stay over its top.
+    for i in range(17):
+        pitch = pitch_limit * (2 * i / 16 - 1)
+        c, s = math.cos(pitch), math.sin(pitch)
+        for part in hood:
+            for x, y, z in part.positions:
+                hx, hz = x * c + z * s, -x * s + z * c + hood_lift
+                for under in (turret[0], turret[3]):
+                    lo, hi = bounds(under.positions)
+                    if lo[0] <= hx <= hi[0] and lo[1] <= y <= hi[1]:
+                        assert hz >= hi[2] + .003, (
+                            f"hood dips into the turret at pitch {pitch:.3f}: "
+                            f"{(hi[2] - hz) * 1000:.1f} mm")
     # Every module steers without limit, so each pod and wheel sweeps a disc about its vertical
     # axis. Each swept disc must clear every static part, the carriage over its travel and the
     # feeder roller (a cylinder, so its bounds hold at any spin); seated faces may touch.
     feeder_bounds = bounds(feeder[0].positions)
-    feeder_bounds = ([feeder_bounds[0][0] + .23, feeder_bounds[0][1], feeder_bounds[0][2] + .20],
-                     [feeder_bounds[1][0] + .23, feeder_bounds[1][1], feeder_bounds[1][2] + .20])
+    feeder_bounds = ([feeder_bounds[0][0] + .23, feeder_bounds[0][1], feeder_bounds[0][2] + .21],
+                     [feeder_bounds[1][0] + .23, feeder_bounds[1][1], feeder_bounds[1][2] + .21])
     module_obstacles = obstacles + [("feeder roller", feeder_bounds, 0.0)]
     worst = None
     for mx, my in module_xy:

@@ -52,7 +52,7 @@ tab is now saved.
 
 ![Block Bot 3D tab, dragged to orbit the robot](docs/images/ascope-3d.gif)
 
-Drag to orbit, scroll to zoom. With no code written yet every joint sits at its reference pose and
+Drag to orbit, scroll to zoom. With no code written yet every part sits still in its starting position and
 the robot stands at its start position.
 
 ## 4. Write the roller
