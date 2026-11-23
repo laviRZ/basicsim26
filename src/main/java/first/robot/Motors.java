@@ -17,6 +17,10 @@ import first.robot.subsystems.turret.TurretConstants;
  *
  * <p>Units follow the joint: radians for the feeder, the intake frame and roller, the hood and the
  * turret; metres for the carriage.
+ *
+ * <p>The swerve drivetrain is different in one way: its wheels stand on the carpet, so how fast a
+ * wheel turns depends on the whole robot and on whether the wheel grips. Its motors and its gyro
+ * come from the same place, the simulated carpet, and each may be asked for once.
  */
 public final class Motors {
   /** The feeder roller. Open loop; position in radians. */
@@ -92,6 +96,29 @@ public final class Motors {
         TurretConstants.MAX_YAW,
         RobotPhysics.Turret.GRAVITY,
         Constants.LOOP_PERIOD);
+  }
+
+  /**
+   * A swerve module's drive motor. Position and velocity are the wheel's, in radians: multiply by
+   * {@link RobotPhysics.Drive#WHEEL_RADIUS} for distance rolled. Modules are numbered 0 to 3 in the
+   * order of {@link RobotPhysics.Drive#MODULE_LOCATIONS}.
+   */
+  public static Motor swerveDrive(int module) {
+    return Carpet.get().claimDrive(module);
+  }
+
+  /**
+   * A swerve module's steer motor. Position is the module's heading relative to the robot, in
+   * radians: 0 rolls toward the robot's front, positive is counter-clockwise seen from above. It is
+   * unwrapped — it keeps counting past a full turn — and turns without limit.
+   */
+  public static Motor swerveSteer(int module) {
+    return Carpet.get().claimSteer(module);
+  }
+
+  /** The gyro, mounted on the drivetrain. */
+  public static Gyro gyro() {
+    return Carpet.get().claimGyro();
   }
 
   private Motors() {}

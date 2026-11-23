@@ -1,12 +1,14 @@
 # Block Bot — WPILib 2026
 
 A simulated FRC robot for learning command-based code: one Kraken X60 per joint, real mechanism
-physics, and a 3D view of every joint in AdvantageScope. Nothing is plugged in.
+physics, a swerve drivetrain on a simulated carpet, and a 3D view of every joint in AdvantageScope.
+Nothing is plugged in.
 
-![Block Bot in AdvantageScope](docs/images/ascope-3d.png)
+![Block Bot driving a figure eight while its mechanisms move](docs/images/blockbot-hero.gif)
 
-The five exercises — roller, elevator, intake, hood, turret — are in [EXERCISES.md](EXERCISES.md).
-This page gets the simulator and the 3D view running; then you write the first stage.
+The seven exercises — roller, elevator, intake, hood, turret, swerve, odometry — are in
+[EXERCISES.md](EXERCISES.md). This page gets the simulator and the 3D view running; then you write the
+first stage.
 
 ## What you need
 
@@ -34,7 +36,7 @@ A **Robot Simulation** window opens. Before driving:
 1. **Robot State** → click **Teleoperated**.
 2. **System Joysticks** → drag **Keyboard 0** onto **Joystick[0]**.
 
-![Sim GUI with Teleoperated selected and Keyboard 0 assigned](docs/images/sim-teleop.png)
+![Clicking Teleoperated, dragging Keyboard 0 onto Joystick 0, then holding Z](docs/images/sim-setup.gif)
 
 `Keyboard 0` turns four keys into controller buttons: **Z** is A, **X** is B, **C** is X, **V** is Y.
 
@@ -48,7 +50,10 @@ Open AdvantageScope (installed with WPILib), then:
 Importing a layout closes the window. Open AdvantageScope again and repeat step 1: the Block Bot
 tab is now saved.
 
-![Block Bot 3D tab](docs/images/ascope-3d.png)
+![Block Bot 3D tab, dragged to orbit the robot](docs/images/ascope-3d.gif)
+
+Drag to orbit, scroll to zoom. With no code written yet every joint sits at its reference pose and
+the robot stands at its start position.
 
 ## 4. Write the roller
 
@@ -72,10 +77,20 @@ RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCom
 Hold **Z**. With a **Line Graph** tab (`Alt+G`) showing **Roller → PositionRadians** and
 **Roller → VelocityRadiansPerSecond**, it should look like this:
 
-![Roller position and velocity while Z is held](docs/images/ascope-graph.png)
+![Roller position and velocity as Z is held and released](docs/images/roller-graph.gif)
 
 Velocity jumps to about 105 rad/s while you hold Z, and position climbs steadily. Release Z: the
 velocity falls back and the position flattens.
+
+## Later: swerve and odometry
+
+The last two stages drive the robot. The simulator plays the world's part: it decides where the robot
+really goes on the carpet — wheels grip up to a limit and slip past it, bumpers stop at the walls —
+and the 3D view draws that, so the robot drives before your code knows where it is. In the final
+stage you work that out from wheel encoders and the gyro, and a green ghost shows your answer beside
+the real robot:
+
+![The ghost runs ahead on the launch and drives through the wall the robot stopped at](docs/images/odometry-wall.gif)
 
 ## If something does not work
 

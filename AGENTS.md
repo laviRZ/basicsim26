@@ -23,11 +23,13 @@ Stop the sim before `build.ps1`: a running sim holds the JNI natives in `build/j
 |Path|Owner|Rule|
 |---|---|---|
 |`Motor.java`|infrastructure|the hardware seam: volts in, position/velocity out; the sim lives behind it|
-|`Motors.java`|infrastructure|the given physical world: one described motor per joint|
+|`Motors.java`|infrastructure|the given physical world: one described motor per joint, plus the gyro|
+|`Carpet.java`|infrastructure, package-private|the drivetrain's world: wheel grip and slip, walls, the true pose|
+|`Gyro.java`|infrastructure|the gyro seam: yaw and yaw rate, nothing about position|
 |`RobotPhysics.java`|infrastructure|the plant in one unit-typed table: gearing, inertia, mass, gravity; given, read-only|
 |`BlockBot.java`|infrastructure|draws the six joints; holds every transform chain|
 |`Robot.java`|infrastructure, one line per stage|receivers, mechanism fields, `m_blockBot.track*`, bindings|
-|`Constants.java`|shared|robot-wide values: loop period, controller port|
+|`Constants.java`|shared|robot-wide values: loop period, controller port, field size, start pose|
 |`subsystems/<name>/`|students|one `Subsystem` class, its commands, and its `<Name>Constants`|
 |`assets/Robot_BlockBot/`|generated|never hand-edit; regenerate with the tool below|
 
@@ -36,6 +38,12 @@ never imports `BlockBot`, and never imports `edu.wpi.first.wpilibj.simulation`. 
 `m_blockBot.trackFeeder(m_roller::getSpinRadians)` and so on, and `BlockBot` alone knows the geometry
 (including the intake-roller-on-frame and hood-on-turret chains). An unregistered joint reads zero, so
 it sits at the model's reference pose.
+
+The drivetrain is the exception, on purpose: nothing registers it. `BlockBot` draws the robot pose,
+the steering pods and the wheels from `Carpet` — where the robot really is, not where any subsystem
+says — so the robot drives before students write odometry, and their odometry (`Drive/EstimatedPose`,
+drawn as a ghost) is an estimate to compare against it. `Carpet` is package-private so student code
+cannot read the truth, as on a real robot.
 
 **Physics is behind the motor seam, never in a subsystem.** `Motor` has three kinds — `flywheel`,
 `joint`, `lift` — each wrapping a WPILib simulator (`FlywheelSim`, `SingleJointedArmSim`,
@@ -47,8 +55,21 @@ students without being theirs to rewrite; each mechanism's travel and gain live 
 `<Name>Constants`. That keeps student code hardware-shaped (`setVoltage`, `getPosition`, `stop`)
 while the model comes from `edu.wpi.first.math.system.plant.DCMotor`'s real constants, gearing,
 inertia, gravity, current draw and limit clamping (`LinearSystemId.createFlywheelSystem` for the
-rollers). Adding a joint means adding a row to `RobotPhysics`; adding a fourth kind of mechanism
-means adding a factory in `Motor`.
+rollers). Adding a joint means adding a row to `RobotPhysics`; adding a new kind of mechanism
+means adding a factory in `Motor`. Swerve adds two: `rotor` (`DCMotorSim`, unlimited travel, for
+steering) and `steppedBy`, a motor whose physics another class steps — the drive wheels, which
+`Carpet` steps because a wheel's speed depends on whether it grips.
+
+**The carpet.** `Carpet` owns the four drive wheels, the four steer rotors and the gyro, created
+together on the first `Motors.swerveDrive/swerveSteer/gyro` call (each may be claimed once) and
+stepped after the steer rotors each loop, in 20 substeps. Each wheel pushes with the current-limited
+motor torque; it grips until the force asked of it (along plus a proportional sideways cornering
+force) leaves the friction circle of `WHEEL_COF` times a quarter of the weight, then slips at the
+friction limit and spins on its own until it catches the carpet again. Module forces sum to one rigid
+body; the bumpers clamp at the field walls with no motion into them; the gyro integrates true rotation
+times `1 + GYRO_SCALE_ERROR`. `DRIVE_CURRENT_LIMIT` sits deliberately above the slip current (about
+52 A here), so full-stick launches and wall shoves slip and odometry drifts — teaching material, not a
+bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
 
 ## Conventions
 
@@ -100,14 +121,17 @@ means adding a factory in `Motor`.
 - Source keys are `/RealOutputs/<Key>` — no `NT:` prefix and no `AdvantageKit` segment — and that form
   works for both the live NT source and a `.wpilog` opened from `logs/`. `NT:/AdvantageKit/RealOutputs/...`
   resolves to nothing in either mode.
-- `Robot/Pose` is published every loop at a point inside the field (the field origin is the driver
-  station corner, where the model would intersect the wall). A constant pose is fine live: AdvantageScope
-  subscribes with periodic resend, so the NT4 server keeps streaming the last value. In a log the pose
-  has a single sample, so advance the playhead off `0s` before the first sample.
-- The 3D tab is **two sources, not seven**: robot `/RealOutputs/Robot/Pose` (`Pose3d`, model `Block
-  Bot` — the config `name`, not the folder) and one component `/RealOutputs/BlockBot/Poses`
-  (`Pose3d[]`). Component pose `i` drives `model_i.glb`; per-component sources are neither needed
-  nor accepted. `ascope/BlockBot.json` seeds the tab with both; importing a layout closes the
+- `Robot/Pose` is the carpet's true pose, published every loop; before the drivetrain exists it is
+  `Constants.Field.START_POSE`, inside the field (the origin is the driver station corner, where the
+  model would intersect the wall). A constant pose is fine live: AdvantageScope subscribes with
+  periodic resend, so the NT4 server keeps streaming the last value. In a log a constant pose has a
+  single sample, so advance the playhead off `0s` before the first sample.
+- The 3D tab is **three sources, not fifteen**: robot `/RealOutputs/Robot/Pose` (`Pose3d`, model
+  `Block Bot` — the config `name`, not the folder), one component `/RealOutputs/BlockBot/Poses`
+  (`Pose3d[]`, fourteen entries), and a green ghost on `/RealOutputs/Drive/EstimatedPose` (`Pose2d`)
+  that stays empty until students write odometry. Component pose `i` drives `model_i.glb`;
+  per-component sources are neither needed nor accepted. `ascope/BlockBot.json` seeds the tab
+  (camera `-2` is Orbit Robot, so a driving robot stays centred); importing a layout closes the
   window, so reconnect afterwards.
 - `.wpilog` files are readable directly: WPILOG records are `[1-byte bitfield][entry id][payload
   length][timestamp][payload]`, with the field widths packed into the bitfield. Logged structs are raw
@@ -122,9 +146,11 @@ means adding a factory in `Motor`.
 ## Block Bot model
 
 `tools/build_block_bot.py` (stdlib only, `python tools/build_block_bot.py`) regenerates the model in
-`assets/Robot_BlockBot/`: `model.glb` (chassis, wheels, elevator rails, turret pedestal, intake hinge)
-plus `model_0..5.glb`, one articulated component each, in `config.json` component order (feeder roller,
-carriage, intake frame, intake roller, turret, hood). Geometry is authored in robot axes (`+x` forward,
+`assets/Robot_BlockBot/`: `model.glb` (chassis, bumpers, elevator rails, turret pedestal, intake hinge)
+plus `model_0..13.glb`, one articulated component each, in `config.json` component order (feeder roller,
+carriage, intake frame, intake roller, turret, hood, then four swerve steering pods and four wheels,
+each front-left, front-right, back-left, back-right). Module positions in the generator must match
+`RobotPhysics.Drive.MODULE_LOCATIONS`, which `BlockBot` and the carpet use. Geometry is authored in robot axes (`+x` forward,
 `+z` up, metres, floor at z=0) with empty `rotations`/`zeroedRotations` and every pivot at its file
 origin.
 
@@ -133,7 +159,9 @@ and proves turret/hood clearance rather than estimating it: yaw is unlimited, so
 about the yaw axis matter, and it intersects each moving part's convex `(r, z)` profile with every
 static part's and the carriage's `(r, z)` box (separating-axis test). Current worst margins to the
 elevator are 91.6 mm (turret) and 36.8 mm (hood); seated joints such as the bearing collar under the
-yaw ring may touch, but nothing may interpenetrate.
+yaw ring may touch, but nothing may interpenetrate. Swerve modules steer without limit too, so each pod
+and wheel's swept disc is checked against every static part, the carriage over its travel and the
+feeder roller; the worst margin is 5.8 mm (a wheel to a side rail).
 
 **It also copies the set into `%APPDATA%\AdvantageScope\userAssets\Robot_BlockBot`, the only folder the
 viewer reads; `scripts/sim.ps1` performs the same mirror on every run, so a fresh clone draws the robot

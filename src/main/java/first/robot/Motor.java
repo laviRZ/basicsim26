@@ -16,6 +16,7 @@ import edu.wpi.first.units.measure.Mass;
 import edu.wpi.first.units.measure.MomentOfInertia;
 import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.units.measure.Voltage;
+import edu.wpi.first.wpilibj.simulation.DCMotorSim;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
 import edu.wpi.first.wpilibj.simulation.FlywheelSim;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
@@ -106,8 +107,37 @@ public final class Motor {
             period.in(Seconds)));
   }
 
+  /**
+   * A shaft that turns without limit and without load: a swerve module's steering. Position in
+   * radians at the output, unwrapped — it keeps counting past a full turn.
+   */
+  static Motor rotor(DCMotor gearbox, double gearing, MomentOfInertia inertia, Time period) {
+    return new Motor(
+        new Rotor(
+            new DCMotorSim(
+                LinearSystemId.createDCMotorSystem(
+                    gearbox, inertia.in(KilogramSquareMeters), gearing),
+                gearbox),
+            period.in(Seconds)));
+  }
+
+  /**
+   * A motor whose physics something else steps, because its load is not its own: a drive wheel,
+   * whose speed the carpet and the rest of the robot decide together.
+   */
+  static Motor steppedBy(Physics physics) {
+    return new Motor(physics, false);
+  }
+
   private Motor(Physics physics) {
+    this(physics, true);
+  }
+
+  private Motor(Physics physics, boolean stepsItself) {
     this.m_physics = physics;
+    if (!stepsItself) {
+      return;
+    }
     // A motor is not a command subsystem: it registers only its physics step, so it advances once
     // per scheduler loop and the subsystem that owns it never calls update().
     CommandScheduler.getInstance()
@@ -141,7 +171,7 @@ public final class Motor {
   }
 
   /** What a motor does. One implementation per kind of mechanism. */
-  private interface Physics {
+  interface Physics {
     void setVoltage(double volts);
 
     void step();
@@ -181,6 +211,36 @@ public final class Motor {
     @Override
     public double velocity() {
       return m_sim.getAngularVelocity().in(RadiansPerSecond);
+    }
+  }
+
+  private static final class Rotor implements Physics {
+    private final DCMotorSim m_sim;
+    private final double m_period;
+
+    Rotor(DCMotorSim sim, double period) {
+      this.m_sim = sim;
+      this.m_period = period;
+    }
+
+    @Override
+    public void setVoltage(double volts) {
+      m_sim.setInputVoltage(volts);
+    }
+
+    @Override
+    public void step() {
+      m_sim.update(m_period);
+    }
+
+    @Override
+    public double position() {
+      return m_sim.getAngularPositionRad();
+    }
+
+    @Override
+    public double velocity() {
+      return m_sim.getAngularVelocityRadPerSec();
     }
   }
 

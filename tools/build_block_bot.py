@@ -228,8 +228,10 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     origin = (0, 0, 0)
     gray, dark, tire, bumper = "#636E78", "#3B4249", "#22262A", "#C93B2B"
-    # Frame perimeter is y = +/-0.305, wheels are outboard at y = +/-0.33, and thin bumpers sit
-    # outside them at y = +/-0.40, so the wheels read from every angle. Deck top is z = 0.16.
+    # Frame perimeter is y = +/-0.305 and thin bumpers sit outside it at y = +/-0.40. Deck top is
+    # z = 0.16. Four swerve modules sit under the deck; each is two components -- a pod that steers
+    # about its vertical axis (a fork under the deck and a cap with a pointer above it, so the
+    # steer angle reads from above) and a wheel that rolls about its axle.
     # Joints. The turret yaws without limit, so the elevator must lie entirely outside the circle
     # swept by the hood: the carriage's near face is the closest approach, and the barrel is kept
     # short enough to stay inside it. The intake is a hinge at the chassis front: the frame swings
@@ -255,8 +257,6 @@ def main():
         elevator_static.append(box(.05, .05, .48, (elevator_x, sign * upright_y, .41), dark))
         base.append(box(.06, .03, .09, (hinge_x, sign * .26, .215), dark))          # hinge bosses
         base.append(box(.06, .025, .09, (.23, sign * .16, .21), dark))              # feeder bearings
-        for wx in (-.30, 0.0, .30):
-            base.append(cylinder(.07, .05, "y", (wx, sign * .335, .07), tire))
     base.extend(elevator_static)
     models = [base,
               [cylinder(.04, .32, "y", origin, "#EB8936"),
@@ -284,12 +284,24 @@ def main():
                cylinder(.05, .16, "x", (.085, 0, 0), "#F778BA"),
                cylinder(.055, .03, "x", (.165, 0, 0), "#DB61A2"),
                box(.16, .022, .018, (.09, 0, .045), "#DB61A2")]]
+    # Swerve modules, front-left, front-right, back-left, back-right -- the order of
+    # RobotPhysics.Drive.MODULE_LOCATIONS. Pods pivot at the module's floor point; wheels pivot
+    # at their axle, which rides the pod at wheel_z.
+    module_xy = [(.14, .195), (.14, -.195), (-.14, .195), (-.14, -.195)]
+    wheel_r, wheel_w = .0508, .038
+    pod = [box(.08, .008, .08, (0, -.027, .09), "#8B949E"),         # fork plates
+           box(.08, .008, .08, (0, .027, .09), "#8B949E"),
+           cylinder(.03, .03, "z", (0, 0, .175), "#F2CC60"),        # steer cap above the deck
+           box(.045, .014, .012, (.0225, 0, .196), "#9E6A03")]      # pointer: rolling direction
+    wheel = [cylinder(wheel_r, wheel_w, "y", origin, tire),
+             box(.09, .04, .012, origin, "#E6EDF3")]                 # spoke: shows the spin
+    models += [pod] * 4 + [wheel] * 4
     # Clearances the MockBot poses rely on. The turret yaws without limit about x = -0.02, so the
     # hood sweeps a full disc: every static part, and the carriage anywhere in its travel, must
     # stay outside it. Computed from the real vertices over the real pitch range, not from a
     # hand-derived radius -- an approximate radius is how a barrel ends up inside the elevator.
     # models[0] is the static base; the rest follow config.json component order.
-    feeder, carriage, intake_frame, intake_roller, turret, hood = models[1:]
+    feeder, carriage, intake_frame, intake_roller, turret, hood = models[1:7]
     turret_xy, turret_z, hood_lift = (-.02, 0), .30, .07
     pitch_limit = math.radians(15)
     obstacles = [(f"base part {i}", bounds(p.positions), 0.0) for i, p in enumerate(base)]
@@ -314,12 +326,37 @@ def main():
                 f"{label} can touch {name}: profile overlap {-gap * 1000:.1f} mm")
         print(f"{label}: swept profile clears every obstacle, worst margin "
               f"{worst[0] * 1000:.1f} mm to {worst[1]}")
+    # Every module steers without limit, so each pod and wheel sweeps a disc about its vertical
+    # axis. Each swept disc must clear every static part, the carriage over its travel and the
+    # feeder roller (a cylinder, so its bounds hold at any spin); seated faces may touch.
+    feeder_bounds = bounds(feeder[0].positions)
+    feeder_bounds = ([feeder_bounds[0][0] + .23, feeder_bounds[0][1], feeder_bounds[0][2] + .20],
+                     [feeder_bounds[1][0] + .23, feeder_bounds[1][1], feeder_bounds[1][2] + .20])
+    module_obstacles = obstacles + [("feeder roller", feeder_bounds, 0.0)]
+    worst = None
+    for mx, my in module_xy:
+        for label, parts, lift in (("pod", pod, 0.0), ("wheel", wheel, wheel_r)):
+            for part in parts:
+                radius = max(math.hypot(x, y) for x, y, _ in part.positions)
+                zlo = min(z for *_, z in part.positions) + lift
+                zhi = max(z for *_, z in part.positions) + lift
+                for name, ((lox, loy, loz), (hix, hiy, hiz)), _ in module_obstacles:
+                    if min(zhi, hiz) - max(zlo, loz) <= 1e-9:
+                        continue  # stacked or seated, not overlapping in height
+                    gap = math.hypot(max(lox - mx, 0.0, mx - hix),
+                                     max(loy - my, 0.0, my - hiy)) - radius
+                    assert gap >= -1e-9, (f"module at {mx, my}: {label} sweeps into {name}, "
+                                          f"overlap {-gap * 1000:.1f} mm")
+                    if worst is None or gap < worst[0]:
+                        worst = (gap, f"{label} at {mx, my} to {name}")
+    print(f"swerve: every module sweeps clear, worst margin {worst[0] * 1000:.1f} mm "
+          f"({worst[1]})")
     assert crossbar_z - .025 - (carriage_z0 + carriage_travel + .075) >= .02
     assert upright_y - .025 - (carriage_half_y + .02) >= .01
     config = {"name": "Block Bot", "isFTC": False, "disableSimplification": True,
               "rotations": [], "position": [0, 0, 0], "cameras": [],
               "components": [{"zeroedRotations": [], "zeroedPosition": [0, 0, 0]}
-                             for _ in range(6)]}
+                             for _ in range(len(models) - 1)]}
     (output / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     for i, parts in enumerate(models):
         name = "model" if i == 0 else f"model_{i - 1}"
@@ -327,8 +364,8 @@ def main():
         path.write_bytes(glb(parts, name))
         lo, hi = bounds([p for part in parts for p in part.positions])
         validate(path, expect_x=(lo[0], hi[0]))
-    assert len(list(output.glob("model*.glb"))) == 7
-    assert len(json.loads((output / "config.json").read_text())["components"]) == 6
+    assert len(list(output.glob("model*.glb"))) == 15
+    assert len(json.loads((output / "config.json").read_text())["components"]) == 14
     install(output)
 
 

@@ -1,5 +1,7 @@
 package first.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -21,24 +23,27 @@ import org.littletonrobotics.junction.Logger;
  * computed here, not in mechanism code. An unregistered joint reads zero, so it sits at the model's
  * reference pose instead of collapsing to the origin.
  *
+ * <p>The drivetrain needs no registration. Its pose and its modules are drawn from the simulated
+ * {@link Carpet} — where the robot really is, how each module is really steered and how far each
+ * wheel has really turned — not from anything a subsystem reports. Code that never computes a
+ * position still sees the robot move, and odometry, when it exists, is a separate estimate to
+ * compare against this one.
+ *
  * <p>The array order is fixed by {@code assets/Robot_BlockBot/config.json}: entry {@code i} binds
  * {@code model_i.glb} to pose {@code i}.
  */
 public final class BlockBot {
-  /** Six poses, in {@code config.json} component order. */
+  /**
+   * Fourteen poses, in {@code config.json} component order: the six mechanism parts, then the four
+   * steering pods and the four wheels, each set front-left, front-right, back-left, back-right.
+   */
   private static final String POSES_KEY = "BlockBot/Poses";
 
   /**
-   * The frame every component hangs on. Published every loop; the NT4 server resends the latest
-   * value to subscribers, so a constant pose is fine.
+   * The frame every component hangs on: where the robot really is on the carpet. Before anything
+   * asks for the drivetrain it stands still at {@link Constants.Field#START_POSE}.
    */
   private static final String ROBOT_POSE_KEY = "Robot/Pose";
-
-  /**
-   * Where the robot stands on the field. The field origin is the driver station corner, where the
-   * model would intersect the wall, so it is placed a few metres inside instead.
-   */
-  private static final Pose3d ROBOT_POSE = new Pose3d(4.0, 4.0, 0.0, Rotation3d.kZero);
 
   /** Where each joint sits in the model's zero configuration. */
   private static final double FEEDER_X = 0.23;
@@ -52,6 +57,7 @@ public final class BlockBot {
   private static final double TURRET_X = -0.02;
   private static final double TURRET_Z = 0.30;
   private static final double HOOD_OFFSET_Z = 0.07;
+  private static final double WHEEL_Z = RobotPhysics.Drive.WHEEL_RADIUS.in(Meters);
 
   private DoubleSupplier m_feederSpin = () -> 0.0;
   private DoubleSupplier m_carriageHeight = () -> 0.0;
@@ -89,8 +95,9 @@ public final class BlockBot {
     m_hoodPitch = pitchRadians;
   }
 
-  /** Sends the robot frame and the six component poses to AdvantageScope. */
+  /** Sends the robot frame and the fourteen component poses to AdvantageScope. */
   public void periodic() {
+    Carpet carpet = Carpet.existing();
     Pose3d turret =
         new Pose3d(TURRET_X, 0, TURRET_Z, new Rotation3d(0, 0, m_turretYaw.getAsDouble()));
     Pose3d intakeFramePose =
@@ -105,10 +112,31 @@ public final class BlockBot {
               INTAKE_ROLLER_OFFSET_X, 0, 0, new Rotation3d(0, -m_intakeRoller.getAsDouble(), 0))),
       turret,
       turret.transformBy(
-          new Transform3d(0, 0, HOOD_OFFSET_Z, new Rotation3d(0, m_hoodPitch.getAsDouble(), 0)))
+          new Transform3d(0, 0, HOOD_OFFSET_Z, new Rotation3d(0, m_hoodPitch.getAsDouble(), 0))),
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
     };
+    for (int i = 0; i < 4; i++) {
+      double steer = carpet == null ? 0 : carpet.steerAngle(i);
+      double spin = carpet == null ? 0 : carpet.wheelAngle(i);
+      Pose3d pod =
+          new Pose3d(
+              RobotPhysics.Drive.MODULE_LOCATIONS[i].getX(),
+              RobotPhysics.Drive.MODULE_LOCATIONS[i].getY(),
+              0,
+              new Rotation3d(0, 0, steer));
+      poses[6 + i] = pod;
+      poses[10 + i] = pod.transformBy(new Transform3d(0, 0, WHEEL_Z, new Rotation3d(0, spin, 0)));
+    }
 
-    Logger.recordOutput(ROBOT_POSE_KEY, ROBOT_POSE);
+    Logger.recordOutput(
+        ROBOT_POSE_KEY, new Pose3d(carpet == null ? Constants.Field.START_POSE : carpet.pose()));
     Logger.recordOutput(POSES_KEY, poses);
   }
 }

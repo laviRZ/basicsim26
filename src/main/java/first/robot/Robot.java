@@ -14,6 +14,9 @@ import org.littletonrobotics.junction.wpilog.WPILOGWriter;
  * m_blockBot}, register it with {@code m_blockBot.trackFeeder(m_roller::getSpinRadians)}, and bind
  * its command in {@link #configureButtonBindings()}.
  *
+ * <p>The swerve drivetrain needs no registration: {@link BlockBot} draws it from the simulated
+ * carpet, where the robot really is, whatever the drive code believes.
+ *
  * <p>Every loop, in this order: the scheduler runs each subsystem's periodic method — the motor
  * steps its physics, then the mechanism logs its state — then polls triggers and runs commands.
  * Finally {@link BlockBot} samples the mechanisms and publishes their poses.

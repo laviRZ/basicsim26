@@ -4,20 +4,24 @@ You are writing the subsystems and commands for a simulated block robot. Nothing
 the code you write is the code you would write on the real thing: a motor takes volts, an encoder
 reports position, a command decides what to do about it.
 
-Five stages, in order: **roller → elevator → intake → hood → turret**. Only the rollers are open
-loop. Every joint with somewhere to be — elevator, intake frame, hood, turret — ends up closed loop.
+Seven stages, in order: **roller → elevator → intake → hood → turret → swerve → odometry**. Only the
+rollers are open loop. Every joint with somewhere to be — elevator, intake frame, hood, turret, each
+swerve module's steering — ends up closed loop. The last two stages drive the robot around the field
+and then work out where it went.
 
 ## What you are given
 
 | File | Yours? | What it is |
 |---|---|---|
 | `Motor` | no | the motor a subsystem drives: volts in, position and velocity out |
-| `Motors` | no | the robot's physical world: one described motor per joint |
-| `RobotPhysics` | no | the plant in one unit-typed table: gearing, inertia, mass, gravity |
+| `Gyro` | no | the drivetrain's gyro: how far the robot has turned since power-on |
+| `Motors` | no | the robot's physical world: one described motor per joint, plus the gyro |
+| `RobotPhysics` | no | the plant in one unit-typed table: gearing, inertia, mass, gravity, wheels and carpet |
+| `Carpet` | no | where the robot really is; you cannot read it, as on a real robot |
 | `BlockBot` | no | draws the robot; you never touch a pose |
 | `Robot` | edit | constructs mechanisms, registers drawers, binds buttons |
 | `subsystems/<name>/<Name>Constants.java` | tune | unit-typed travel and voltage; gains |
-| `Constants` | no | robot-wide values: loop period, controller port |
+| `Constants` | no | robot-wide values: loop period, controller port, field size and start pose |
 | `assets/Robot_BlockBot/` | no | the 3D model |
 
 There is no hardware layer, no IO interface, no replay. A mechanism owns its motors and its state, and
@@ -32,8 +36,11 @@ Motor frame    = Motors.intakeFrame();    // radians, 0 flat
 Motor roller   = Motors.intakeRoller();   // radians
 Motor hood     = Motors.hood();           // radians, 0 level
 Motor turret   = Motors.turret();         // radians, 0 forward
+Motor drive0   = Motors.swerveDrive(0);   // radians at the wheel; module 0 is front-left
+Motor steer0   = Motors.swerveSteer(0);   // radians, 0 rolls forward, unwrapped
+Gyro gyro      = Motors.gyro();           // gyro.getYawRadians(), counter-clockwise positive
 
-feeder.setVoltage(6.0);      // volts, every loop while running
+feeder.setVoltage(Volts.of(6.0));   // every loop while running
 feeder.stop();
 feeder.getPosition();
 feeder.getVelocity();
@@ -206,6 +213,83 @@ alongside `Turret/YawRadians`.
 Done when: the turret holds wherever you point it, and a full sweep never drives the barrel into the
 elevator — that clearance is proven at every angle, so if it clips, your angle is wrong.
 
+## Stage 6 — Swerve drive
+
+New file `subsystems/drive/Drive.java`. Four modules, each a drive motor and a steer motor, and the
+gyro: `Motors.swerveDrive(i)`, `Motors.swerveSteer(i)` for `i` 0 to 3 (front-left, front-right,
+back-left, back-right), and `Motors.gyro()`.
+
+The geometry is the robot's, not yours: build `new SwerveDriveKinematics(RobotPhysics.Drive.MODULE_LOCATIONS)`
+and turn wheel radians into metres with `RobotPhysics.Drive.WHEEL_RADIUS`. Speeds and gains are in
+`DriveConstants`.
+
+Every loop, for the `ChassisSpeeds` you want:
+
+1. `ChassisSpeeds.discretize(speeds, 0.02)`, then `kinematics.toSwerveModuleStates(...)`, then
+   `SwerveDriveKinematics.desaturateWheelSpeeds(states, DriveConstants.MAX_SPEED)`.
+2. Per module, read where it points now — `new Rotation2d(steer.getPosition())` — then
+   `state.optimize(current)` so it never turns more than 90°, and `state.cosineScale(current)` so it
+   does not drive hard while still turning.
+3. Steer closed loop: `STEER_KP * MathUtil.angleModulus(target − current)`. The steer encoder is
+   unwrapped — it keeps counting past a full turn — so the error must be wrapped, or a module at
+   `3π` will spin all the way round to reach `π`.
+4. Drive feedforward plus feedback: `DRIVE_KV * speed + DRIVE_KP * (speed − measured)`, where
+   `measured` is `drive.getVelocity()` times the wheel radius.
+
+Drive field-relative from the sticks as the default command:
+`ChassisSpeeds.fromFieldRelativeSpeeds(vx, vy, omega, new Rotation2d(gyro.getYawRadians()))`, with
+`vx` from `-getLeftY()`, `vy` from `-getLeftX()` and `omega` from `-getRightX()`, each through
+`MathUtil.applyDeadband(..., STICK_DEADBAND)` and scaled by `MAX_SPEED` / `MAX_ANGULAR_SPEED`.
+
+Keyboard 0 has three axes: A/D (left X), W/S (left Y) and E/R, which holds its value instead of
+springing back. `getRightX()` reads axis 4, so to turn from the keyboard open **DS → Keyboard 0
+Settings** in the Sim GUI, raise the axis **Count** to 5, and give **Axis 4** a Decrease and an
+Increase key (say Q and E — clear E from Axis 2 first) with a **Decay Rate** like Axis 0's. A real
+controller needs none of this.
+
+Post `Drive/ModuleStates` (measured) and `Drive/ModuleSetpoints` as `SwerveModuleState[]`;
+AdvantageScope's Swerve tab draws both.
+
+**You do not know where the robot is, and this stage does not need you to.** The 3D view draws the
+robot where the simulated carpet put it — `Robot/Pose` is the world's truth, which your code cannot
+read, just as a real robot cannot. The carpet is not a perfect servant: each wheel grips only up to
+`WHEEL_COF` times its share of the weight, so a hard launch or a shove against a wall makes the wheels
+spin. Watch `Carpet/SlipMetersPerSecond` and `Carpet/WallContact` while you drive.
+
+Done when: the robot drives around the field, "forward" on the stick is away from the blue wall
+whatever way the robot faces, and no module ever swings more than a quarter turn to change direction.
+
+## Stage 7 — Odometry
+
+![Odometry's ghost drives through the wall while the robot stops at it](docs/images/odometry-wall.gif)
+
+Add odometry to `Drive`: a `SwerveDriveOdometry` built from your kinematics, the gyro's angle, the
+four module positions and `Constants.Field.START_POSE` — the carpet sets the robot down there, so
+odometry that starts anywhere else is wrong from the first loop. A module position is distance rolled
+(`drive.getPosition()` times the wheel radius) and the steer angle. Update it at the top of
+`periodic()` and post the result as `Drive/EstimatedPose` (`Pose2d`).
+
+The Block Bot tab already has a green ghost listening on that key: the ghost is where your code thinks
+the robot is, the solid robot is where it is. Then make them disagree, and explain each one:
+
+- **Drive gently.** The ghost should sit on the robot.
+- **Launch from rest at full stick.** The drive current limit sits a little above the slip current,
+  so the wheels spin before the robot moves and the ghost runs ahead.
+- **Drive into a wall and keep pushing.** The bumpers stop; the wheels do not. The ghost drives on
+  through the wall.
+- **Spin in place for ten turns.** Heading creeps: the gyro reads `GYRO_SCALE_ERROR` too much.
+
+Then fix what you can from your own side — limit acceleration with a `SlewRateLimiter` so the wheels
+never ask the carpet for more than it gives, and reset odometry when the robot is somewhere you know.
+What you cannot fix from wheels and a gyro alone is why robots also look at the field.
+
+Stretch: write the odometry yourself. Each loop, take the change in every module position,
+`kinematics.toTwist2d(deltas)`, replace its rotation with the gyro's change, and `pose.exp(twist)`.
+Post it beside WPILib's and graph the difference.
+
+Done when: the ghost follows the robot through ordinary driving, and you can make it leave the robot
+on purpose and say why every time.
+
 ## Gotchas
 
 - **Disable cancels commands** and `finallyDo` runs. A joint that must stay put needs a hold command,
@@ -219,4 +303,8 @@ elevator — that clearance is proven at every angle, so if it clips, your angle
   subsystem.
 - **Two commands requiring the same subsystem cannot run together** — the second preempts the first.
 - **Re-assert voltage every loop.** `setVoltage` is not a latch.
-- **Do not edit `Motor`, `Motors`, `BlockBot`, or the logging setup in `Robot`.** No stage needs it.
+- **Ask for each drivetrain part once.** A second `Motors.swerveDrive(0)` throws: there is one
+  front-left wheel.
+- **Wrap steering error, not steering position.** The steer encoder counts past a full turn on purpose.
+- **Do not edit `Motor`, `Motors`, `BlockBot`, `Carpet`, or the logging setup in `Robot`.** No stage
+  needs it.
