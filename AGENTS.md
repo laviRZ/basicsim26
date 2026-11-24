@@ -74,7 +74,7 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
 ## Conventions
 
 - Member fields are `m_camelCase`. A class calls its own methods with an explicit `this.`
-  (`this.configureButtonBindings()`, `this.run(...)`, `this.setVoltage(Volts.of(0))`);
+  (`this.configureButtonBindings()`, `this.register()`, `this.addRequirements(...)`);
   static constants stay `UPPER_SNAKE_CASE`.
 - Physical constants are unit-typed (`Distance`, `Angle`, `Voltage`, `MomentOfInertia`, `Mass`,
   `Time`), never bare doubles; convert with `.in(unit)` only at the `Motor` seam.
@@ -85,25 +85,32 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   turns a default-enabled extension into `HALSIM_EXTENSIONS` for the forked JVM. `halsim_ds_socket`
   stays disabled: enabling it hands DS state to a real DriverStation and removes the Sim GUI's own
   Robot State window.
-- **Default commands are scheduled automatically.** `setDefaultCommand(cmd)` registers the subsystem
-  and v2 runs the default whenever nothing else requires it, so a positional joint only needs an
-  explicit `setDefaultCommand(hold())`; the default must require only its own subsystem. An
-  open-loop subsystem that Binds nothing simply registers itself with `this.register()`.
+- **Commands are classes first.** Students write each command as a `Command` subclass in its
+  mechanism's folder (`RunRoller`, `HoldElevator`, `MoveElevator`), overriding `initialize`,
+  `execute`, `isFinished` and `end` and calling `this.addRequirements(subsystem)`; the subsystem
+  exposes plain methods for them (`spin()`, `setTarget(...)`, `driveToTarget()`). Command factories
+  (`this.run(...)`, `finallyDo`) and suppliers are an optional later section of `EXERCISES.md`, so
+  student-facing text and hints must not require them before then; the drive command takes the
+  `CommandXboxController` itself rather than `DoubleSupplier`s.
+- **Default commands are scheduled automatically.** `Robot` sets each positional joint's
+  `Hold<Name>` with `setDefaultCommand`, and v2 runs it whenever nothing else requires the subsystem;
+  the default must require only its own subsystem. Every subsystem registers itself with
+  `this.register()` as the last line of its constructor.
 - Bindings live in the `Robot` constructor, on the scheduler's default `EventLoop`, which is polled
   every loop — disabled included. `whileTrue` is what makes a held button resume after a disable:
   `RobotModeTriggers.teleop()` is `isTeleopEnabled()` (mode **and** enabled), so the composed
   condition falls on disable and rises again on re-enable, and `whileTrue` schedules on the rise and
   cancels on the fall. A disabled robot cancels commands that do not run while disabled, and
-  `schedule()` refuses to start them. `finallyDo` is what puts a mechanism back at rest on cancel —
-  it runs on interruption and on normal end alike.
+  `schedule()` refuses to start them. A command's `end(interrupted)` is what puts a mechanism back at
+  rest on cancel — it runs on interruption and on normal end alike.
 - Control split: rollers are open loop (`setVoltage`); every positional joint is closed loop
-  (`KP * (target − position)`), with `hold()` as the bound default command and `goTo(...)` as the
-  move. A pure P loop settles below target when gravity is simulated — that steady-state error is
+  (`KP * (target − position)`), with a `Hold<Name>` command as the default and a `Move<Name>`
+  command, whose `initialize` sets the target, as the move. A pure P loop settles below target when gravity is simulated — that steady-state error is
   deliberate teaching material, not a bug to paper over.
 - Simulators enforce their limits (`Math.clamp` inside `update`); a command should still not ask for
   travel the mechanism does not have.
 - A mechanism posts its own state by overriding `periodic()`, and registers at the end of its
-  constructor — with `this.register()`, or implicitly through `setDefaultCommand`. Commands v2 calls
+  constructor with `this.register()`. Commands v2 calls
   `periodic()` every loop, and `CommandScheduler.run()` calls periodics in subsystem **registration
   order**; `Motor` registers its physics step the moment it is constructed, so registering the
   mechanism afterwards is what makes the step precede the log and the commands. It records

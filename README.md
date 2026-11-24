@@ -57,8 +57,8 @@ the robot stands at its start position.
 
 ## 4. Write the roller
 
-Add `src/main/java/first/robot/subsystems/roller/Roller.java`: the roller's motor, its command, and
-`getSpinRadians()`.
+Add two classes in `src/main/java/first/robot/subsystems/roller/`: `Roller.java`, the subsystem that
+owns the roller's motor, and `RunRoller.java`, the command that spins it.
 
 Then in `Robot.java`:
 
@@ -67,7 +67,7 @@ Then in `Robot.java`:
 - bind its command in `configureButtonBindings()`:
 
 ```java
-RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
+RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m_roller));
 ```
 
 [EXERCISES.md](EXERCISES.md) stage 1 has the details.

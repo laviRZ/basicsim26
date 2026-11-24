@@ -10,9 +10,10 @@ import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 /**
  * Robot container: owns the mechanisms, publishes telemetry, and binds driver buttons.
  *
- * <p>Start with {@code subsystems/roller/Roller.java}: add the roller, construct it beside {@code
- * m_blockBot}, register it with {@code m_blockBot.trackFeeder(m_roller::getSpinRadians)}, and bind
- * its command in {@link #configureButtonBindings()}.
+ * <p>Start with {@code subsystems/roller/}: write the {@code Roller} subsystem and its {@code
+ * RunRoller} command, construct the roller beside {@code m_blockBot}, register it with {@code
+ * m_blockBot.trackFeeder(m_roller::getSpinRadians)}, and bind its command in {@link
+ * #configureButtonBindings()}. Default commands ({@code setDefaultCommand}) are set here too.
  *
  * <p>The swerve drivetrain needs no registration: {@link BlockBot} draws it from the simulated
  * carpet, where the robot really is, whatever the drive code believes.
@@ -56,7 +57,7 @@ public class Robot extends LoggedRobot {
    * roller while A is held:
    *
    * <pre>{@code
-   * RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
+   * RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m_roller));
    * }</pre>
    */
   private void configureButtonBindings() {}

@@ -25,7 +25,8 @@ know any of them before you start.
 
 You write your code in `src/main/java/first/robot/subsystems/`, one folder per mechanism. Each
 folder already has a `<Name>Constants.java` with that mechanism's numbers (its limits, its voltage,
-the gains you will tune), so read it before you start a stage.
+the gains you will tune), so read it before you start a stage. Your subsystem and its command classes
+go in the same folder.
 
 You also edit `Robot.java`. That is where you create each mechanism and connect it to buttons.
 
@@ -99,32 +100,34 @@ A part you have not written yet stands still. To see numbers over time, open a *
 
 ## Stage 1: Roller
 
-The roller is a wheel that spins while you hold A. Write it in
-`src/main/java/first/robot/subsystems/roller/Roller.java`.
+The roller is a wheel that spins while you hold A. You write two classes for it, both in
+`src/main/java/first/robot/subsystems/roller/`.
 
 First, two words you will use in every stage:
 
 - A **subsystem** is one mechanism of the robot: the roller, the elevator, the drivetrain. Its class
-  owns that mechanism's motors.
-- A **command** is something the robot does for a while: spin the roller, move the elevator up. A
-  command belongs to a subsystem, and only one command per subsystem runs at a time.
+  owns that mechanism's motors, and gives the rest of the code simple methods like "spin" and "stop".
+- A **command** is something the robot does for a while: spin the roller, move the elevator up. Each
+  command is its own class. It says which subsystem it uses, and only one command can use a subsystem
+  at a time.
 
-Here is the shape of the class. The comments say what goes in each part:
+### The subsystem: `Roller.java`
 
 ```java
 public class Roller implements Subsystem {
   private final Motor m_motor = Motors.feederRoller();
 
   public Roller() {
-    // Lets WPILib call periodic() for you every loop.
+    // Lets WPILib call periodic() for you every loop. Keep it the last line of the constructor.
     this.register();
   }
 
-  public Command runCommand() {
-    // this.run(() -> ...) makes a command that calls your code every loop while it runs:
-    //   set the motor to RollerConstants.VOLTAGE there.
-    // .finallyDo(() -> ...) runs once when the command stops: stop the motor there.
-    // .withName("Roller.Run") gives it a name you can see in the logs.
+  public void spin() {
+    // set the motor to RollerConstants.VOLTAGE
+  }
+
+  public void stop() {
+    // stop the motor
   }
 
   /** How far the roller has turned, for the 3D view. */
@@ -141,17 +144,56 @@ public class Roller implements Subsystem {
 }
 ```
 
-Then, in `Robot.java`:
+### The command: `RunRoller.java`
+
+A command class extends WPILib's `Command` and fills in up to four methods. WPILib calls them for you:
+
+| Method | When WPILib calls it |
+|---|---|
+| `initialize()` | once, when the command starts |
+| `execute()` | every loop while the command runs |
+| `isFinished()` | every loop, after `execute()`; return `true` to end the command |
+| `end(boolean interrupted)` | once, when the command stops; `interrupted` is `true` if something else stopped it |
+
+You only write the ones you need. `RunRoller` keeps spinning until the button is let go, so it never
+finishes by itself, and it stops the motor when it ends:
+
+```java
+public class RunRoller extends Command {
+  private final Roller m_roller;
+
+  public RunRoller(Roller roller) {
+    m_roller = roller;
+    // Tells WPILib this command uses the roller, so no other command can use it at the same time.
+    this.addRequirements(roller);
+  }
+
+  @Override
+  public void execute() {
+    // spin the roller
+  }
+
+  @Override
+  public void end(boolean interrupted) {
+    // stop the roller
+  }
+}
+```
+
+### Wire it up
+
+In `Robot.java`:
 
 1. Create the roller next to `m_blockBot`: `private final Roller m_roller = new Roller();`
 2. In the constructor, let the 3D view see it: `m_blockBot.trackFeeder(m_roller::getSpinRadians);`
+   The `::` hands the 3D view the method itself, so it can ask for the angle every loop.
 3. In `configureButtonBindings()`, run the command while A is held:
 
 ```java
-RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(m_roller.runCommand());
+RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m_roller));
 ```
 
-`whileTrue` starts the command when you press A and stops it when you let go.
+`whileTrue` starts the command when you press A and stops it when you let go, which calls its `end`.
 `RobotModeTriggers.teleop()` adds "and the robot is enabled in teleop", so a disabled robot never
 spins.
 
@@ -164,7 +206,7 @@ for that your code has to look.
 
 ## Stage 2: Elevator
 
-The elevator lifts a carriage up and down. Write it in `subsystems/elevator/Elevator.java`, and use
+The elevator lifts a carriage up and down. Write it in `subsystems/elevator/`, and use
 `Motors.elevator()` for its motor.
 
 ### Moving to a target
@@ -180,52 +222,59 @@ The difference `target − position` is the **error**. Far from the target the e
 motor pushes hard. Close to the target it pushes gently, and at the target it stops pushing. `KP` (the
 **proportional gain**) says how many volts to push with for each metre of error. You will tune it.
 
-### Two commands, one rule
-
-A positional mechanism needs two commands that share that one line of maths:
-
-- **hold** keeps the carriage where it is. It runs whenever nothing else is using the elevator.
-- **goTo** moves it to a new target, and keeps it there while the button is held.
+The subsystem remembers its target and knows that one line:
 
 ```java
-private Distance m_target = ElevatorConstants.MIN_HEIGHT;
+public class Elevator implements Subsystem {
+  private final Motor m_motor = Motors.elevator();
+  private Distance m_target = ElevatorConstants.MIN_HEIGHT;
 
-public Elevator() {
-  // The default command runs whenever no other command is using this subsystem.
-  // Setting one also registers the subsystem, so you do not call register() here.
-  this.setDefaultCommand(this.hold());
-}
+  public Elevator() {
+    this.register();
+  }
 
-private Command hold() {
-  return this.run(this::driveToTarget).withName("Elevator.Hold");
-}
+  public void setTarget(Distance height) {
+    m_target = height;
+  }
 
-public Command goTo(Distance height) {
-  return this.run(
-          () -> {
-            m_target = height;
-            this.driveToTarget();
-          })
-      .withName("Elevator.GoTo");
-}
+  /** Pushes towards the target. A command calls this every loop. */
+  public void driveToTarget() {
+    m_motor.setVoltage(
+        Volts.of(ElevatorConstants.KP * (m_target.in(Meters) - m_motor.getPosition())));
+  }
 
-private void driveToTarget() {
-  m_motor.setVoltage(
-      Volts.of(ElevatorConstants.KP * (m_target.in(Meters) - m_motor.getPosition())));
+  // getHeightMeters() and periodic() as in stage 1
 }
 ```
 
 `Distance` is a number with a unit attached, so you cannot mix up metres and inches by mistake.
 `m_target.in(Meters)` turns it into a plain number of metres, which is what the motor works in.
 
-Because `goTo` changes `m_target`, letting go of the button hands the elevator back to `hold`, which
-keeps it at the new height.
+### Two commands
+
+A mechanism that has to stay somewhere needs two commands:
+
+- **`HoldElevator`** keeps the carriage at its target. Its `execute()` calls `driveToTarget()`, and
+  that is all.
+- **`MoveElevator`** takes a height in its constructor. Its `initialize()` sets the target, and its
+  `execute()` calls `driveToTarget()`, so it keeps moving while the button is held.
+
+`HoldElevator` becomes the elevator's **default command**: the one WPILib runs whenever no other
+command is using the elevator. Set it in the `Robot` constructor:
+
+```java
+m_elevator.setDefaultCommand(new HoldElevator(m_elevator));
+```
+
+Let go of the button and `MoveElevator` ends. The elevator is free again, so `HoldElevator` starts
+and keeps the carriage at the target `MoveElevator` set.
 
 ### Wire it up
 
 - In `Robot`: `m_blockBot.trackCarriage(m_elevator::getHeightMeters);`
-- Bind Y (V on the keyboard) to `goTo(ElevatorConstants.MAX_HEIGHT)` and A (Z) to
-  `goTo(ElevatorConstants.MIN_HEIGHT)`, both with `whileTrue` like the roller.
+- Bind Y (V on the keyboard) to `new MoveElevator(m_elevator, ElevatorConstants.MAX_HEIGHT)` and A (Z)
+  to `new MoveElevator(m_elevator, ElevatorConstants.MIN_HEIGHT)`, both with `whileTrue` like the
+  roller.
 - Log `Elevator/TargetMeters` and `Elevator/PositionMeters` from `periodic()`.
 
 ### Look closely
@@ -243,12 +292,14 @@ can explain the gap.
 ## Stage 3: Intake
 
 The intake is a frame that swings up and down, with a roller at its end. Write it in
-`subsystems/intake/Intake.java`. It is one subsystem with **two motors**: `Motors.intakeFrame()` and
+`subsystems/intake/`. It is one subsystem with **two motors**: `Motors.intakeFrame()` and
 `Motors.intakeRoller()`.
 
 - The frame works like the elevator, but in radians: 0 is flat on the floor and the top of its travel
-  is upright. Use a hold command and a goTo command, with `IntakeConstants.FRAME_KP`.
-- The roller works like stage 1, at `IntakeConstants.ROLLER_VOLTAGE`.
+  is upright. Give `Intake` a frame target and a `driveFrame()` method using
+  `IntakeConstants.FRAME_KP`, and write `HoldIntake` and `MoveIntake` commands like the elevator's.
+- The roller works like stage 1, at `IntakeConstants.ROLLER_VOLTAGE`: give `Intake` `spinRoller()`
+  and `stopRoller()`, and write a `SpinIntake` command.
 - Y (V) stows the frame upright at `FRAME_MAX_ANGLE`, A (Z) deploys it flat at `FRAME_MIN_ANGLE`,
   and holding X (C) spins the roller.
 
@@ -256,20 +307,21 @@ Wire it with `m_blockBot.trackIntake(m_intake::getFrameAngleRadians, m_intake::g
 and log `Intake/FrameTargetRadians`, `Intake/FramePositionRadians` and
 `Intake/RollerVelocityRadiansPerSecond`.
 
-There is a trap here. Remember that only one command per subsystem runs at a time. When the roller
-command starts, the frame's hold command stops, and nothing keeps the frame up. Try it and watch the
-frame drop. Then make the roller command keep driving the frame to its target too.
+There is a trap here. Every one of these commands uses the intake, and only one can use it at a time.
+When `SpinIntake` starts, `HoldIntake` stops, and nothing keeps the frame up. Try it and watch the
+frame drop. Then make `SpinIntake`'s `execute()` keep driving the frame to its target too.
 
 **Done when:** the frame swings to either end and stays there, and the roller spins without the frame
 moving.
 
 ## Stage 4: Hood
 
-The hood tilts up and down to aim. Write it in `subsystems/hood/Hood.java`, with `Motors.hood()`.
+The hood tilts up and down to aim. Write it in `subsystems/hood/`, with `Motors.hood()`.
 
 This is the elevator's pattern again, measured in radians: 0 is level, and `HoodConstants` holds the
 limits and `KP`. Gravity pulls the hood down, so with nothing holding it, it drops to its lower stop.
 
+- Write `HoldHood` and `MoveHood`, and make `HoldHood` the default command.
 - Y (V) aims up to `HoodConstants.MAX_PITCH`; A (Z) aims down to `HoodConstants.MIN_PITCH`.
 - Wire it with `m_blockBot.trackHood(m_hood::getPitchRadians);` and log `Hood/TargetRadians` and
   `Hood/PositionRadians`.
@@ -278,10 +330,10 @@ limits and `KP`. Gravity pulls the hood down, so with nothing holding it, it dro
 
 ## Stage 5: Turret
 
-The turret turns the whole shooter around. Write it in `subsystems/turret/Turret.java`, with
-`Motors.turret()`. Its angle is 0 facing forward and grows as it turns left.
+The turret turns the whole shooter around. Write it in `subsystems/turret/`, with `Motors.turret()`.
+Its angle is 0 facing forward and grows as it turns left.
 
-Same pattern again, with `TurretConstants.KP`:
+Same pattern again, `HoldTurret` and `MoveTurret`, with `TurretConstants.KP`:
 
 - X (C) turns it left to `TurretConstants.MAX_YAW`, B (X) turns it right to `TurretConstants.MIN_YAW`,
   and Y (V) brings it back to face forward, `Radians.of(0)`.
@@ -298,6 +350,23 @@ Two things to notice:
 
 **Done when:** the turret holds wherever you send it, and a full sweep from one end to the other
 never touches the elevator.
+
+## Optional: shorter commands
+
+By now you have written a lot of small command classes that look almost the same. WPILib can build
+simple commands for you, without a class. A subsystem's `this.run(...)` makes a command that requires
+the subsystem and runs your code every loop, like an `execute()`; `.finallyDo(...)` adds code for when
+it ends, like an `end()`. So the whole `RunRoller` class is the same as this method in `Roller`:
+
+```java
+public Command runCommand() {
+  return this.run(this::spin).finallyDo(this::stop).withName("Roller.Run");
+}
+```
+
+`withName` gives the command the name you see in the logs, which a class gets from its class name.
+Try rewriting one stage this way. If you prefer classes, keep them: both are normal on real robots,
+and the rest of these exercises work either way.
 
 ## Stage 6: Swerve drive
 
@@ -347,30 +416,43 @@ every loop. A `SwerveModuleState` is a wheel speed in metres per second plus an 
   called a **feedforward**. The second part corrects whatever the guess gets wrong.
 
 Then write `subsystems/drive/Drive.java`, the subsystem: four modules, in the order above, and the
-gyro. `Drive` cannot see the controller, which lives in `Robot`, so its command takes the stick
-values as **suppliers**: little functions it calls every loop to read the stick fresh.
+gyro. Give it `setAllModules(SwerveModuleState state)`, which hands the same state to every module.
+
+The command that drives from the sticks is `DriveWithSticks`. It needs the controller, so its
+constructor takes the controller as well as the drive:
 
 ```java
-// In Drive:
-public Command slide(DoubleSupplier forwardStick, DoubleSupplier leftStick) {
-  return this.run(
-      () -> {
-        double x = MathUtil.applyDeadband(forwardStick.getAsDouble(), DriveConstants.STICK_DEADBAND);
-        double y = MathUtil.applyDeadband(leftStick.getAsDouble(), DriveConstants.STICK_DEADBAND);
-        double speed = Math.hypot(x, y) * DriveConstants.MAX_SPEED.in(MetersPerSecond);
-        Rotation2d angle = new Rotation2d(Math.atan2(y, x));
-        // give every module new SwerveModuleState(speed, angle)
-      });
-}
+public class DriveWithSticks extends Command {
+  private final Drive m_drive;
+  private final CommandXboxController m_controller;
 
-// In Robot's constructor:
-m_drive.setDefaultCommand(
-    m_drive.slide(() -> -m_driverController.getLeftY(), () -> -m_driverController.getLeftX()));
+  public DriveWithSticks(Drive drive, CommandXboxController controller) {
+    m_drive = drive;
+    m_controller = controller;
+    this.addRequirements(drive);
+  }
+
+  @Override
+  public void execute() {
+    double x = MathUtil.applyDeadband(-m_controller.getLeftY(), DriveConstants.STICK_DEADBAND);
+    double y = MathUtil.applyDeadband(-m_controller.getLeftX(), DriveConstants.STICK_DEADBAND);
+    double speed = Math.hypot(x, y) * DriveConstants.MAX_SPEED.in(MetersPerSecond);
+    Rotation2d angle = new Rotation2d(Math.atan2(y, x));
+    m_drive.setAllModules(new SwerveModuleState(speed, angle));
+  }
+}
 ```
 
 The minus signs are there because a stick reads negative when pushed forward and positive when
-pushed right, while the robot counts forward and left as positive. The **deadband** treats a stick that is nearly centred as exactly centred, so a
-real controller's slightly-off stick does not make the robot creep.
+pushed right, while the robot counts forward and left as positive. The **deadband** treats a stick
+that is nearly centred as exactly centred, so a real controller's slightly-off stick does not make
+the robot creep.
+
+In `Robot`, create `Drive` like the other mechanisms and make this its default command:
+
+```java
+m_drive.setDefaultCommand(new DriveWithSticks(m_drive, m_driverController));
+```
 
 `Drive` needs no `m_blockBot.track...` line: the 3D view already draws the drivetrain.
 
@@ -387,19 +469,21 @@ To turn while driving, each wheel needs its own speed and angle. The maths that 
 should move" into "what each wheel should do" is called **kinematics**, and WPILib does it for you.
 
 How the robot should move is a `ChassisSpeeds`: forward speed, sideways speed (left is positive), and
-turning speed (radians per second, left is positive).
+turning speed (radians per second, left is positive). Give `Drive` a `drive(ChassisSpeeds speeds)`
+method:
 
 ```java
-SwerveDriveKinematics kinematics = new SwerveDriveKinematics(RobotPhysics.Drive.MODULE_LOCATIONS);
+// A field in Drive:
+SwerveDriveKinematics m_kinematics = new SwerveDriveKinematics(RobotPhysics.Drive.MODULE_LOCATIONS);
 
-// Every loop:
-ChassisSpeeds speeds = new ChassisSpeeds(forward, left, turn);
+// In drive(speeds):
 // The wheels only change every loop, so driving while turning curves a little off course.
 // discretize corrects for that.
 speeds = ChassisSpeeds.discretize(speeds, Constants.LOOP_PERIOD.in(Seconds));
-SwerveModuleState[] states = kinematics.toSwerveModuleStates(speeds);
+SwerveModuleState[] states = m_kinematics.toSwerveModuleStates(speeds);
 // If one wheel would need to go faster than it can, slow all four down together.
 SwerveDriveKinematics.desaturateWheelSpeeds(states, DriveConstants.MAX_SPEED);
+// then give each module its own state
 ```
 
 Then, in `Module.setState`, before driving the motors:
@@ -412,9 +496,9 @@ state.optimize(current);
 state.cosineScale(current);
 ```
 
-Give `Drive` a new command, like `slide` but with a third supplier for turning, and make it the
-default command instead. Turning comes from the right stick: `-getRightX()`, times
-`DriveConstants.MAX_ANGULAR_SPEED`.
+Change `DriveWithSticks.execute()` to build a `ChassisSpeeds` and call `m_drive.drive(...)`. Forward
+and sideways come from the left stick as before, times `MAX_SPEED`. Turning comes from the right stick:
+`-m_controller.getRightX()`, through the deadband, times `DriveConstants.MAX_ANGULAR_SPEED`.
 
 The keyboard needs a key for turning first. In the simulator window, open **DS → Keyboard 0
 Settings**, raise the axis **Count** to 5, and give **Axis 4** a Decrease and an Increase key. Q and E
@@ -431,12 +515,13 @@ faces. That is called **robot-relative** driving, and it is hard to drive that w
 
 In **field-relative** driving, forward on the stick always means away from you, whichever way the
 robot faces. To do that, the code needs to know which way the robot faces, and that is what the
-**gyro** measures. One call converts the stick's direction into the robot's:
+**gyro** measures. Give `Drive` a `getHeading()` method that returns
+`new Rotation2d(m_gyro.getYawRadians())`. Then, in `DriveWithSticks`, one call converts the stick's
+direction into the robot's:
 
 ```java
 ChassisSpeeds speeds =
-    ChassisSpeeds.fromFieldRelativeSpeeds(
-        forward, left, turn, new Rotation2d(m_gyro.getYawRadians()));
+    ChassisSpeeds.fromFieldRelativeSpeeds(forward, left, turn, m_drive.getHeading());
 ```
 
 **Done when:** W always drives the robot the way it faced when the simulator started, however it has
@@ -468,10 +553,10 @@ Add it to `Drive`. WPILib's `SwerveDriveOdometry` does the maths:
 ```java
 // In the constructor:
 m_odometry = new SwerveDriveOdometry(
-    kinematics, new Rotation2d(m_gyro.getYawRadians()), positions, Constants.Field.START_POSE);
+    m_kinematics, this.getHeading(), positions, Constants.Field.START_POSE);
 
 // At the top of periodic(), every loop:
-m_odometry.update(new Rotation2d(m_gyro.getYawRadians()), positions);
+m_odometry.update(this.getHeading(), positions);
 Logger.recordOutput("Drive/EstimatedPose", m_odometry.getPoseMeters());
 ```
 
@@ -495,8 +580,9 @@ explain each one:
 
 Then fix what you can:
 
-- **Accelerate gently.** A `SlewRateLimiter` limits how fast a value may change. Put the stick values
-  through one, and the wheels never ask the carpet for more grip than it has.
+- **Accelerate gently.** A `SlewRateLimiter` limits how fast a value may change. Give
+  `DriveWithSticks` one per stick value, put each value through its limiter in `execute()`, and the
+  wheels never ask the carpet for more grip than it has.
 - **Reset when you know.** `m_odometry.resetPosition(...)` sets the estimate to a pose you know is
   right, for example at the start of a match.
 
@@ -504,7 +590,7 @@ Some drift cannot be fixed from wheels and a gyro alone. That is why real robots
 look at the field.
 
 **Stretch:** write the odometry yourself. Every loop, find how far each module moved since the last
-loop and hand the four changes to `kinematics.toTwist2d(...)`. The result is a small step of the
+loop and hand the four changes to `m_kinematics.toTwist2d(...)`. The result is a small step of the
 robot, called a **twist**. Replace its turn with the gyro's change in angle, then move your pose with
 `pose.exp(twist)`. Log your pose next to WPILib's and graph the difference.
 
@@ -516,17 +602,21 @@ purpose and say why every time.
 - **Pressing a button does nothing.** The simulator must be enabled in Teleoperated, Keyboard 0 must
   be on Joystick[0], and the binding must be in `configureButtonBindings()`. Check you did not
   comment it out when you moved on to a new stage, and that you are pressing the right key: A is Z.
-- **It moves for an instant, then stops.** The voltage is set only once. Use `this.run(...)`, which
-  runs every loop, not `this.runOnce(...)`.
+- **It moves for an instant, then stops.** Either the voltage is set in `initialize()`, which runs
+  once, instead of `execute()`, which runs every loop; or `isFinished()` returns `true`.
+- **The motor keeps going after you let go.** The command's `end()` does not stop the motor.
 - **The graph moves, but the 3D view does not.** You have not called `m_blockBot.track...` for it in
   `Robot`.
 - **The 3D view moves, but there is nothing to graph.** `periodic()` is not running. Call
-  `this.register()` or `this.setDefaultCommand(...)` in the constructor.
-- **A mechanism falls when you let go.** It has no hold command. Set one with `setDefaultCommand`.
-- **It falls when another of its commands starts.** Only one command per subsystem runs at a time.
+  `this.register()` at the end of the subsystem's constructor.
+- **A mechanism falls when you let go.** It has no default command. Set its `Hold...` command with
+  `setDefaultCommand` in `Robot`.
+- **It falls when another of its commands starts.** Only one command can use a subsystem at a time.
   The new command must keep holding what the old one held.
+- **Two mechanisms stop each other.** A command's `addRequirements` names a subsystem it does not
+  need. Each command should require only the subsystem it drives.
 - **It stops when you disable, and does not come back.** That is expected: disabling stops every
-  command. Hold commands come back by themselves when you enable again. A button you keep holding
+  command. Default commands come back by themselves when you enable again. A button you keep holding
   comes back too, because `RobotModeTriggers.teleop()` is part of its binding.
 - **An error says a swerve part is already taken.** You asked `Motors` for the same module twice.
   Ask once and keep the motor in a field.
@@ -540,7 +630,9 @@ The code in this project follows a few rules. Following them keeps your code eas
 everyone else's:
 
 - Fields start with `m_`: `m_motor`, `m_target`.
-- A class calls its own methods with `this.`: `this.run(...)`, `this.driveToTarget()`.
+- A class calls its own methods with `this.`: `this.register()`, `this.addRequirements(...)`.
+- Command classes are named for what they do, verb first: `RunRoller`, `MoveElevator`,
+  `HoldElevator`.
 - Constants are `UPPER_SNAKE_CASE` and live in your `<Name>Constants`.
 - Physical values carry their unit (`Distance`, `Angle`, `Voltage`), and you turn them into plain
   numbers with `.in(Meters)` or `.in(Radians)` only where you hand them to a motor.
