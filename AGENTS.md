@@ -218,3 +218,28 @@ session — editing the repo assets alone leaves the viewer drawing stale geomet
 which looks exactly like parts colliding or floating off their pivots.**
 
 Generated sim state (`simgui*.json`, `networktables.json`) and `logs/` are gitignored.
+
+## Docs site and translations
+
+`README.md` and `EXERCISES.md` are the only source of truth; the website at
+<https://lavirz.github.io/basicsim26/> (GitHub Pages) shows them in English, Hebrew and Spanish.
+
+- `tools/translate_docs.py` splits each page at its `## ` headings and translates only sections whose
+  English changed, with `claude-opus-5-5` (adaptive thinking, effort `high`, server-side refusal
+  fallbacks). It caches by a hash of each English section in `docs/i18n/<lang>/<Page>.sections.json`
+  and writes `docs/i18n/<lang>/<Page>.md`. Those files are generated: never hand-edit them, and
+  spotless skips them. There is deliberately no glossary; the model gets the project, audience and
+  "what the student does with this text" as context (`CONTEXT` in the script). A translation must
+  keep code blocks, link targets, headings and table rows identical or it is retried, then the run
+  fails. `--check` lists stale sections; `--fake` writes structural placeholders for offline tests.
+- `.github/workflows/docs-translate.yml` runs it on pushes to `master` that touch the pages and opens
+  or updates one pull request (`docs/translations`) for review; it starts from that branch's
+  `docs/i18n` so unmerged work is not paid for twice. Needs the `ANTHROPIC_API_KEY` repository
+  secret and "Allow GitHub Actions to create and approve pull requests".
+- `tools/build_docs_site.py` lays the pages out in `build/docs-site-src/` and runs MkDocs Material
+  with `mkdocs-static-i18n` (`mkdocs.yml`, folder structure, English default with fallback) into
+  `build/docs-site/`; `--serve` previews locally. A translation behind the English gets a note
+  linking the English page (absolute URL: MkDocs rewrites relative links across languages). Hebrew
+  is right-to-left with code kept left-to-right by the CSS in that script.
+  `.github/workflows/docs-site.yml` builds and deploys it on pushes to `master`; Pages' source must
+  be "GitHub Actions". Python versions are pinned in `docs/requirements.txt`.

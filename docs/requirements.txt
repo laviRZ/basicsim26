@@ -1,0 +1,5 @@
+# The docs site and its translations: tools/build_docs_site.py and tools/translate_docs.py.
+anthropic==2.14.0
+mkdocs==1.6.1
+mkdocs-material==9.8.2
+mkdocs-static-i18n==1.3.1

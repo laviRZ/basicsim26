@@ -13,7 +13,7 @@ The stages, in order:
 1. **Roller**: spin a motor while a button is held.
 2. **Elevator**: move to a height and stay there, then do it with WPILib's PID controller.
 
-   Then a pause to learn lambdas, suppliers and a shorter way to write commands.
+    Then a pause to learn lambdas, suppliers and a shorter way to write commands.
 3. **Intake**: two motors in one mechanism, and a smooth, planned move.
 4. **Hood**: the elevator's idea again, but tilting.
 5. **Turret**: turn the shooter around.

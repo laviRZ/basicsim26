@@ -1,0 +1,62 @@
+# The docs website, published to GitHub Pages by .github/workflows/docs-site.yml.
+# Build it with `python tools/build_docs_site.py`, which lays out docs_dir first: the English
+# pages are README.md and EXERCISES.md, the translations are generated into docs/i18n/.
+site_name: Block Bot
+site_description: A simulated FRC robot for learning command-based code with WPILib 2026.
+site_url: https://lavirz.github.io/basicsim26/
+repo_url: https://github.com/laviRZ/basicsim26
+repo_name: laviRZ/basicsim26
+edit_uri: ""
+
+docs_dir: build/docs-site-src
+site_dir: build/docs-site
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: he
+          name: עברית
+          build: true
+        - locale: es
+          name: Español
+          build: true

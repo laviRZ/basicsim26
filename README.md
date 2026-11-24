@@ -1,5 +1,8 @@
 # Block Bot — WPILib 2026
 
+**Read online:** [English](https://lavirz.github.io/basicsim26/) ·
+[עברית](https://lavirz.github.io/basicsim26/he/) · [Español](https://lavirz.github.io/basicsim26/es/)
+
 A simulated FRC robot for learning command-based code: one Kraken X60 per joint, real mechanism
 physics, a swerve drivetrain on a simulated carpet, and a 3D view of every joint in AdvantageScope.
 Nothing is plugged in.
