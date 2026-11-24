@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import edu.wpi.first.hal.HAL;
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -22,8 +22,10 @@ class CarpetTest {
   @BeforeEach
   void setUp() {
     assertTrue(HAL.initialize(500, 0));
-    CommandScheduler.getInstance().unregisterAllSubsystems();
-    Carpet.discard();
+    // A disabled robot applies no voltage, so the tests drive an enabled one.
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    Simulation.reset();
     m_drive = new Motor[4];
     m_steer = new Motor[4];
     for (int i = 0; i < 4; i++) {
@@ -42,7 +44,7 @@ class CarpetTest {
         m_steer[i].setVoltage(Volts.of(MathUtil.clamp(12 * error, -12, 12)));
         m_drive[i].setVoltage(Volts.of(volts[i]));
       }
-      CommandScheduler.getInstance().run();
+      Simulation.step();
     }
   }
 

@@ -11,8 +11,6 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.system.plant.DCMotor;
-import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import edu.wpi.first.wpilibj2.command.Subsystem;
 import org.littletonrobotics.junction.Logger;
 
 /**
@@ -45,6 +43,10 @@ final class Carpet {
   private static final String[] MODULE_NAMES = {
     "front-left", "front-right", "back-left", "back-right"
   };
+
+  /** Each module's log-key name, in the same order. */
+  private static final String[] MODULE_KEYS = {"FrontLeft", "FrontRight", "BackLeft", "BackRight"};
+
   private static final int SUBSTEPS = 20;
   private static final double GRAVITY = 9.81;
   private static final double BATTERY_VOLTS = 12.0;
@@ -95,7 +97,7 @@ final class Carpet {
 
   /**
    * Forgets the carpet so the next {@link #get()} builds a fresh one at the start pose. For tests
-   * only: the caller must also clear the scheduler, which still holds the old one's step.
+   * only, through {@link Simulation#reset()}, which also forgets the old one's motors.
    */
   static void discard() {
     s_carpet = null;
@@ -108,16 +110,17 @@ final class Carpet {
 
   private Carpet() {
     for (int i = 0; i < 4; i++) {
-      // The steering shafts step themselves, and register before the carpet, so each loop the
+      // The steering shafts step themselves, before Simulation steps the carpet, so each loop the
       // carpet sees this loop's steer angles.
       m_steer[i] =
           Motor.rotor(
+              "Drive/" + MODULE_KEYS[i] + "/Steer",
               RobotPhysics.MOTOR,
               RobotPhysics.Drive.STEER_GEARING,
               RobotPhysics.Drive.STEER_INERTIA,
               Constants.LOOP_PERIOD);
       m_wheels[i] = new Wheel();
-      m_drive[i] = Motor.steppedBy(m_wheels[i]);
+      m_drive[i] = Motor.steppedBy("Drive/" + MODULE_KEYS[i] + "/Wheel", m_wheels[i]);
     }
     m_gyro = new Gyro(() -> m_gyroYaw, () -> m_omega * (1 + RobotPhysics.Drive.GYRO_SCALE_ERROR));
 
@@ -125,15 +128,6 @@ final class Carpet {
     m_x = start.getX();
     m_y = start.getY();
     m_heading = start.getRotation().getRadians();
-
-    CommandScheduler.getInstance()
-        .registerSubsystem(
-            new Subsystem() {
-              @Override
-              public void periodic() {
-                Carpet.this.step();
-              }
-            });
   }
 
   Motor claimDrive(int module) {
@@ -182,7 +176,10 @@ final class Carpet {
     return m_wheels[module].m_angle;
   }
 
-  private void step() {
+  /**
+   * Moves the robot one loop, after the motors have their voltages. {@link Simulation} calls it.
+   */
+  void step() {
     m_wallContact = false;
     double h = m_period / SUBSTEPS;
     for (int k = 0; k < SUBSTEPS; k++) {

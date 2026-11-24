@@ -8,6 +8,7 @@ import static edu.wpi.first.units.Units.RadiansPerSecond;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.units.measure.Angle;
@@ -16,12 +17,15 @@ import edu.wpi.first.units.measure.Mass;
 import edu.wpi.first.units.measure.MomentOfInertia;
 import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.units.measure.Voltage;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.simulation.DCMotorSim;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
 import edu.wpi.first.wpilibj.simulation.FlywheelSim;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
-import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import edu.wpi.first.wpilibj2.command.Subsystem;
+import java.util.ArrayList;
+import java.util.List;
+import org.littletonrobotics.junction.Logger;
 
 /**
  * The motor a subsystem drives: volts in, position and velocity out.
@@ -35,18 +39,39 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
  * velocity come out in base units — radians for a wheel or joint, metres for a lift — because the
  * dimension depends on the mechanism. Convert with {@code .in(...)} at the call site.
  *
- * <p>The motor steps itself once per loop, so no mechanism calls {@code update}.
+ * <p>Like a real motor controller, it keeps the last voltage it was given until it is given
+ * another, and it does not move while the robot is disabled. {@link Simulation} steps every motor
+ * once per loop, so no mechanism calls {@code update}, and logs each one under its name: {@code
+ * <Name>/Position<Unit>}, {@code <Name>/Velocity<Unit>PerSecond} and {@code <Name>/AppliedVolts}. A
+ * mechanism logs only what its own code knows, such as its target.
  */
 public final class Motor {
+  /** Every motor, in the order it was made: the order {@link Simulation} steps them. */
+  private static final List<Motor> s_all = new ArrayList<>();
+
+  /** The unit names in each motor's log keys. */
+  private static final String RADIANS = "Radians";
+
+  private static final String METERS = "Meters";
+
   private final Physics m_physics;
+  private final boolean m_stepsItself;
+  private final String m_positionKey;
+  private final String m_velocityKey;
+  private final String m_voltsKey;
+  private double m_requestedVolts;
+  private double m_appliedVolts;
 
   /**
    * A spinning mass: rollers. Position in radians.
    *
    * <p>Package-private: a mechanism asks {@link Motors} for its motor rather than describing one.
    */
-  static Motor flywheel(DCMotor gearbox, double gearing, MomentOfInertia inertia, Time period) {
+  static Motor flywheel(
+      String name, DCMotor gearbox, double gearing, MomentOfInertia inertia, Time period) {
     return new Motor(
+        name,
+        RADIANS,
         new Wheel(
             new FlywheelSim(
                 LinearSystemId.createFlywheelSystem(
@@ -61,6 +86,7 @@ public final class Motor {
    * @param length moment arm gravity acts on
    */
   static Motor joint(
+      String name,
       DCMotor gearbox,
       double gearing,
       MomentOfInertia inertia,
@@ -70,6 +96,8 @@ public final class Motor {
       boolean gravity,
       Time period) {
     return new Motor(
+        name,
+        RADIANS,
         new Joint(
             new SingleJointedArmSim(
                 gearbox,
@@ -85,6 +113,7 @@ public final class Motor {
 
   /** A carriage on a drum: the elevator. Position in metres. */
   static Motor lift(
+      String name,
       DCMotor gearbox,
       double gearing,
       Mass carriage,
@@ -94,6 +123,8 @@ public final class Motor {
       boolean gravity,
       Time period) {
     return new Motor(
+        name,
+        METERS,
         new Carriage(
             new ElevatorSim(
                 gearbox,
@@ -111,8 +142,11 @@ public final class Motor {
    * A shaft that turns without limit and without load: a swerve module's steering. Position in
    * radians at the output, unwrapped — it keeps counting past a full turn.
    */
-  static Motor rotor(DCMotor gearbox, double gearing, MomentOfInertia inertia, Time period) {
+  static Motor rotor(
+      String name, DCMotor gearbox, double gearing, MomentOfInertia inertia, Time period) {
     return new Motor(
+        name,
+        RADIANS,
         new Rotor(
             new DCMotorSim(
                 LinearSystemId.createDCMotorSystem(
@@ -123,36 +157,62 @@ public final class Motor {
 
   /**
    * A motor whose physics something else steps, because its load is not its own: a drive wheel,
-   * whose speed the carpet and the rest of the robot decide together.
+   * whose speed the carpet and the rest of the robot decide together. Position in radians.
    */
-  static Motor steppedBy(Physics physics) {
-    return new Motor(physics, false);
+  static Motor steppedBy(String name, Physics physics) {
+    return new Motor(name, RADIANS, physics, false);
   }
 
-  private Motor(Physics physics) {
-    this(physics, true);
+  private Motor(String name, String unit, Physics physics) {
+    this(name, unit, physics, true);
   }
 
-  private Motor(Physics physics, boolean stepsItself) {
+  private Motor(String name, String unit, Physics physics, boolean stepsItself) {
     this.m_physics = physics;
-    if (!stepsItself) {
-      return;
-    }
-    // A motor is not a command subsystem: it registers only its physics step, so it advances once
-    // per scheduler loop and the subsystem that owns it never calls update().
-    CommandScheduler.getInstance()
-        .registerSubsystem(
-            new Subsystem() {
-              @Override
-              public void periodic() {
-                m_physics.step();
-              }
-            });
+    this.m_stepsItself = stepsItself;
+    this.m_positionKey = name + "/Position" + unit;
+    this.m_velocityKey = name + "/Velocity" + unit + "PerSecond";
+    this.m_voltsKey = name + "/AppliedVolts";
+    s_all.add(this);
   }
 
-  /** Commands the motor. Call it every loop while running; the voltage is not latched. */
+  /**
+   * Gives every motor its voltage for this loop and steps those that step themselves. A disabled
+   * robot applies nothing, whatever was asked, and no motor can apply more than the battery has.
+   */
+  static void applyAndStepAll() {
+    boolean enabled = DriverStation.isEnabled();
+    double battery = RobotController.getBatteryVoltage();
+    for (Motor motor : s_all) {
+      motor.m_appliedVolts =
+          enabled ? MathUtil.clamp(motor.m_requestedVolts, -battery, battery) : 0.0;
+      motor.m_physics.setVoltage(motor.m_appliedVolts);
+      if (motor.m_stepsItself) {
+        motor.m_physics.step();
+      }
+    }
+  }
+
+  /** Logs every motor's position, velocity and applied voltage, once everything has stepped. */
+  static void logAll() {
+    for (Motor motor : s_all) {
+      Logger.recordOutput(motor.m_positionKey, motor.getPosition());
+      Logger.recordOutput(motor.m_velocityKey, motor.getVelocity());
+      Logger.recordOutput(motor.m_voltsKey, motor.m_appliedVolts);
+    }
+  }
+
+  /** Forgets every motor. For tests only, through {@link Simulation#reset()}. */
+  static void forgetAll() {
+    s_all.clear();
+  }
+
+  /**
+   * Commands the motor. It keeps this voltage until you set another or call {@link #stop()}, as a
+   * real motor controller does; the simulation applies it from the next physics step.
+   */
   public void setVoltage(Voltage volts) {
-    m_physics.setVoltage(volts.in(Volts));
+    m_requestedVolts = volts.in(Volts);
   }
 
   /** De-energizes the motor. */

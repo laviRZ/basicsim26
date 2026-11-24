@@ -88,10 +88,10 @@ test {
 
 // Simulation configuration (e.g. environment variables).
 //
-// The sim GUI is *disabled* by default: the HAL extensions are then empty, which is what
-// AdvantageKit log replay needs. scripts/sim.ps1 passes -PsimGui, and GradleRIO turns that into
-// HALSIM_EXTENSIONS for the forked JVM.
-wpi.sim.addGui().defaultEnabled = providers.gradleProperty('simGui').isPresent()
+// The Sim GUI is on by default, so VS Code's "WPILib: Simulate Robot Code" ticks it in its
+// extension picker and scripts/sim.ps1 gets it without flags. This project has no log replay, which
+// is what would need the HAL to load no extensions.
+wpi.sim.addGui().defaultEnabled = true
 // Registered, but not enabled: loading halsim_ds_socket hands DriverStation state to a real
 // DriverStation and removes the Sim GUI's own Robot State controls.
 wpi.sim.addDriverstation()

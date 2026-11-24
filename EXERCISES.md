@@ -37,9 +37,9 @@ Everything else is given. Read it if you are curious, but you do not need to cha
 | File | What it does for you |
 |---|---|
 | `Motors` | hands you a motor for each part of the robot, and the gyro |
-| `Motor` | the motor itself: you give it volts, it tells you where it is |
+| `Motor` | the motor itself: you give it volts, it tells you where it is, and it logs both |
 | `RobotPhysics` | how heavy and how geared each part is; the simulator uses these numbers |
-| `BlockBot` | draws the robot in 3D |
+| `BlockBot` | draws the robot in 3D, straight from the motors |
 | `Constants` | numbers for the whole robot, like where it starts on the field |
 
 ## The motor
@@ -58,7 +58,7 @@ Motor turret   = Motors.turret();         // radians, 0 is facing forward
 Every motor has the same four methods:
 
 ```java
-feeder.setVoltage(Volts.of(6.0));   // push with 6 volts; call it again every loop
+feeder.setVoltage(Volts.of(6.0));   // push with 6 volts, until you say otherwise
 feeder.stop();                      // stop pushing
 feeder.getPosition();               // where it is now (radians or metres)
 feeder.getVelocity();               // how fast it is moving (radians or metres per second)
@@ -66,8 +66,13 @@ feeder.getVelocity();               // how fast it is moving (radians or metres 
 
 A radian is a way of measuring angles: a full turn is 2π radians, about 6.28, so half a turn is π.
 
-The motor does not remember your voltage. Your code runs in a **loop**, 50 times a second, and a
-running command must set the voltage on every pass.
+Your code runs in a **loop**, 50 times a second. The motor keeps the last voltage you gave it, loop
+after loop, until you give it another or call `stop()`, just like a real motor controller. When the
+robot is disabled, every motor stops pushing, whatever you asked for.
+
+Each motor also **logs itself** every loop, under its own name: the roller's position is
+`Roller/PositionRadians`, its speed `Roller/VelocityRadiansPerSecond`, and the voltage it is really
+using `Roller/AppliedVolts`. You never have to log those yourself.
 
 ## Buttons
 
@@ -89,16 +94,17 @@ The stages use the buttons the same way: **Y** (top) means up, **A** (bottom) me
 
 ## Seeing your work
 
-```powershell
-.\scripts\sim.ps1
-```
+In VS Code, press `Ctrl+Shift+P` and run **WPILib: Simulate Robot Code**. When it asks which
+extensions to use, keep **Sim GUI** ticked and press Enter. Stop the simulator (close its window)
+before you run it again.
 
 In the simulator window, click **Teleoperated** and make sure Keyboard 0 is on Joystick[0]. In
 AdvantageScope, connect with **File → Connect to Simulator** and open the **Block Bot** tab. The
 [README](README.md) shows both steps.
 
 A part you have not written yet stands still. To see numbers over time, open a **Line Graph** tab
-(`Alt+G`) and drag in the values your code logs.
+(`Alt+G`) and drag in values: every motor's position, velocity and voltage, and anything your code
+logs.
 
 ## Stage 1: Roller
 
@@ -116,13 +122,8 @@ First, two words you will use in every stage:
 ### The subsystem: `Roller.java`
 
 ```java
-public class Roller implements Subsystem {
+public class Roller extends SubsystemBase {
   private final Motor m_motor = Motors.feederRoller();
-
-  public Roller() {
-    // Lets WPILib call periodic() for you every loop. Keep it the last line of the constructor.
-    this.register();
-  }
 
   public void spin() {
     // set the motor to RollerConstants.VOLTAGE
@@ -131,20 +132,12 @@ public class Roller implements Subsystem {
   public void stop() {
     // stop the motor
   }
-
-  /** How far the roller has turned, for the 3D view. */
-  public double getSpinRadians() {
-    // the motor's position
-  }
-
-  @Override
-  public void periodic() {
-    // Runs every loop, whatever command is running. Log the roller's state here:
-    //   Logger.recordOutput("Roller/PositionRadians", ...);
-    //   Logger.recordOutput("Roller/VelocityRadiansPerSecond", ...);
-  }
 }
 ```
+
+`extends SubsystemBase` makes `Roller` a WPILib subsystem: WPILib now knows it exists, so commands
+can say they use it. The roller's motor logs itself and the 3D view reads it, so the subsystem only
+has to say what the roller can do.
 
 ### The command: `RunRoller.java`
 
@@ -157,8 +150,9 @@ A command class extends WPILib's `Command` and fills in up to four methods. WPIL
 | `isFinished()` | every loop, after `execute()`; return `true` to end the command |
 | `end(boolean interrupted)` | once, when the command stops; `interrupted` is `true` if something else stopped it |
 
-You only write the ones you need. `RunRoller` keeps spinning until the button is let go, so it never
-finishes by itself, and it stops the motor when it ends:
+You only write the ones you need. The motor keeps its voltage, so `RunRoller` starts the roller once,
+when the command starts, and stops it when the command ends. It never finishes by itself: it runs
+until the button is let go.
 
 ```java
 public class RunRoller extends Command {
@@ -166,12 +160,11 @@ public class RunRoller extends Command {
 
   public RunRoller(Roller roller) {
     m_roller = roller;
-    // Tells WPILib this command uses the roller, so no other command can use it at the same time.
     this.addRequirements(roller);
   }
 
   @Override
-  public void execute() {
+  public void initialize() {
     // spin the roller
   }
 
@@ -182,14 +175,27 @@ public class RunRoller extends Command {
 }
 ```
 
+### Requirements: one command per subsystem
+
+`this.addRequirements(roller)` tells WPILib "this command uses the roller". WPILib keeps a list of
+which command is using each subsystem, and it is strict about it:
+
+- **Only one command uses a subsystem at a time.** When a command starts that needs a subsystem
+  another command is already using, WPILib stops the old one first: it calls the old command's
+  `end(true)` (`true` because it was interrupted), and only then the new one's `initialize()`.
+- **Forget it, and WPILib cannot protect you.** Without `addRequirements`, WPILib does not know the
+  command uses the roller. Two such commands could run at once, each setting the motor's voltage over
+  the other's, and nothing would warn you.
+
+So every command class calls `this.addRequirements(...)` in its constructor with each subsystem it
+drives, and only those.
+
 ### Wire it up
 
 In `Robot.java`:
 
 1. Create the roller next to `m_blockBot`: `private final Roller m_roller = new Roller();`
-2. In the constructor, let the 3D view see it: `m_blockBot.trackFeeder(m_roller::getSpinRadians);`
-   Copy the `::` as it is for now; the pause after stage 2 explains it.
-3. In `configureButtonBindings()`, run the command while A is held:
+2. In `configureButtonBindings()`, run the command while A is held:
 
 ```java
 RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m_roller));
@@ -200,7 +206,8 @@ RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m
 spins.
 
 **Done when:** holding A (Z on the keyboard) spins the roller up, and letting go makes it coast to a
-stop. On the graph, velocity climbs, flattens, then falls back to zero.
+stop. Graph `Roller/VelocityRadiansPerSecond` and `Roller/AppliedVolts`: the voltage jumps up and back
+to 0, and the velocity climbs, flattens, then falls back to zero.
 
 The roller is **open loop**: your code pushes with a fixed voltage and never checks how fast the
 roller really goes. That is fine for a roller. Every other mechanism needs to reach a position, and
@@ -230,13 +237,9 @@ motor pushes hard. Close to the target it pushes gently, and at the target it st
 The subsystem remembers its target and knows that one line:
 
 ```java
-public class Elevator implements Subsystem {
+public class Elevator extends SubsystemBase {
   private final Motor m_motor = Motors.elevator();
   private Distance m_target = ElevatorConstants.MIN_HEIGHT;
-
-  public Elevator() {
-    this.register();
-  }
 
   public void setTarget(Distance height) {
     m_target = height;
@@ -248,12 +251,19 @@ public class Elevator implements Subsystem {
         Volts.of(ElevatorConstants.KP * (m_target.in(Meters) - m_motor.getPosition())));
   }
 
-  // getHeightMeters() and periodic() as in stage 1
+  @Override
+  public void periodic() {
+    // WPILib calls this every loop, whatever command is running.
+    Logger.recordOutput("Elevator/TargetMeters", m_target.in(Meters));
+  }
 }
 ```
 
 `Distance` is a number with a unit attached, so you cannot mix up metres and inches by mistake.
 `m_target.in(Meters)` turns it into a plain number of metres, which is what the motor works in.
+
+The motor already logs where the carriage is (`Elevator/PositionMeters`). Only your code knows the
+target, so the subsystem logs that, from `periodic()`.
 
 #### Two commands
 
@@ -264,6 +274,12 @@ A mechanism that has to stay somewhere needs two commands:
 - **`MoveElevator`** takes a height in its constructor. Its `initialize()` sets the target, and its
   `execute()` calls `driveToTarget()`, so it keeps moving while the button is held.
 
+Both require the elevator, with `this.addRequirements(elevator)`.
+
+This time the voltage goes in `execute()`, not `initialize()`. The roller wanted the same voltage the
+whole time, so setting it once was enough. Here the voltage depends on where the carriage is, which
+changes every loop, so the command works it out again every loop.
+
 `HoldElevator` becomes the elevator's **default command**: the one WPILib runs whenever no other
 command is using the elevator. Set it in the `Robot` constructor:
 
@@ -271,20 +287,21 @@ command is using the elevator. Set it in the `Robot` constructor:
 m_elevator.setDefaultCommand(new HoldElevator(m_elevator));
 ```
 
-Let go of the button and `MoveElevator` ends. The elevator is free again, so `HoldElevator` starts
-and keeps the carriage at the target `MoveElevator` set.
+This is requirements at work. Press Y: `MoveElevator` needs the elevator, `HoldElevator` is using
+it, so WPILib ends `HoldElevator` and starts `MoveElevator`. Let go: `MoveElevator` ends, nothing is
+using the elevator, so WPILib starts `HoldElevator` again, and it keeps the carriage at the target
+`MoveElevator` set. Hold Y and press A as well: the newer command takes the elevator from the older
+one.
 
 #### Wire it up
 
-- In `Robot`: `m_blockBot.trackCarriage(m_elevator::getHeightMeters);`
 - Bind Y (V on the keyboard) to `new MoveElevator(m_elevator, ElevatorConstants.MAX_HEIGHT)` and A (Z)
   to `new MoveElevator(m_elevator, ElevatorConstants.MIN_HEIGHT)`, both with `whileTrue` like the
   roller.
-- Log `Elevator/TargetMeters` and `Elevator/PositionMeters` from `periodic()`.
 
 #### Look closely
 
-Hold Y and graph the target against the position. The carriage stops a little **below** the top.
+Hold Y and graph `Elevator/TargetMeters` against `Elevator/PositionMeters`. The carriage stops a little **below** the top.
 
 Gravity pulls the carriage down all the time. The motor only pushes back as hard as the error is big,
 so the carriage settles where the two balance, which has to be a little short of the target. That
@@ -370,14 +387,8 @@ When it needs more than one statement, use braces:
 
 ### Method references: a lambda that only calls one method
 
-`this::stop` means the same as `() -> this.stop()`. You have used one since stage 1:
-
-```java
-m_blockBot.trackFeeder(m_roller::getSpinRadians);
-```
-
-That hands the 3D view the roller's `getSpinRadians` method itself, not its answer, and the 3D view
-calls it every loop.
+`this::stop` means the same as `() -> this.stop()`. It hands over the `stop` method itself, not its
+answer: nothing stops until whoever holds it calls it.
 
 ### Suppliers: asking for a value later
 
@@ -389,9 +400,9 @@ DoubleSupplier forward = () -> -m_driverController.getLeftY();
 double now = forward.getAsDouble();   // reads the stick at this moment
 ```
 
-That is why `trackFeeder` takes a supplier. The 3D view needs the roller's angle **every loop**, not
-the angle at the moment `Robot` was built, so you give it a way to ask. Buttons work the same way: a
-binding asks "is A pressed?" every loop, through a `BooleanSupplier` inside it.
+You give someone a supplier when they need a value **every loop**, not the value at the moment you
+called them. Buttons work this way: a binding asks "is A pressed?" every loop, through a
+`BooleanSupplier` inside it. In stage 6 you hand the drive command its sticks the same way.
 
 ### Captured variables
 
@@ -435,7 +446,7 @@ So `RunRoller` becomes one method in `Roller`:
 
 ```java
 public Command runCommand() {
-  return this.runEnd(this::spin, this::stop).withName("Roller.Run");
+  return this.startEnd(this::spin, this::stop).withName("Roller.Run");
 }
 ```
 
@@ -485,9 +496,8 @@ elevator did, then you make the move smooth.
 - Make `hold()` the default command. Y (V) stows the frame upright at `FRAME_MAX_ANGLE`, A (Z) deploys
   it flat at `FRAME_MIN_ANGLE`, and holding X (C) spins the roller.
 
-Wire it with `m_blockBot.trackIntake(m_intake::getFrameAngleRadians, m_intake::getRollerRadians);`
-and log `Intake/FrameTargetRadians`, `Intake/FramePositionRadians` and
-`Intake/RollerVelocityRadiansPerSecond`.
+The two motors log themselves as `Intake/Frame` and `Intake/Roller`. Log the frame's target as
+`Intake/Frame/TargetRadians` from `periodic()`.
 
 There is a trap here. Every one of these commands requires the intake, and only one can use it at a
 time. When `spinRoller()` starts, `hold()` stops, and nothing keeps the frame up. Try it and watch the
@@ -538,8 +548,8 @@ That belongs in the start part of `startRun(start, action)`, in `hold()`, `goTo(
 `spinRoller()`. Without it, the first move after a disable starts from where the setpoint was left,
 not from where the frame fell to, and the frame jumps.
 
-Log `Intake/FrameSetpointRadians` from `m_frameController.getSetpoint().position`, and graph it with
-the target and the position. The setpoint glides from one end to the other.
+Log `Intake/Frame/SetpointRadians` from `m_frameController.getSetpoint().position`, and graph it
+with the target and the position. The setpoint glides from one end to the other.
 
 The position will not keep up with it yet: with `FRAME_KP` still at its first value it trails by half
 a radian. The small error that a profile leaves only asks for a small voltage. But that small error
@@ -563,8 +573,7 @@ limits and `KP`. Gravity pulls the hood down, so with nothing holding it, it dro
 
 - Write `hold()` and `goTo(Angle angle)`, and make `hold()` the default command.
 - Y (V) aims up to `HoodConstants.MAX_PITCH`; A (Z) aims down to `HoodConstants.MIN_PITCH`.
-- Wire it with `m_blockBot.trackHood(m_hood::getPitchRadians);` and log `Hood/TargetRadians` and
-  `Hood/PositionRadians`.
+- Log `Hood/TargetRadians` from `periodic()`; the motor logs `Hood/PositionRadians`.
 
 **Done when:** the hood moves to either end and stays there with nothing pressed.
 
@@ -577,8 +586,7 @@ Same pattern again, `hold()` and `goTo(Angle angle)`, with `TurretConstants.KP`:
 
 - X (C) turns it left to `TurretConstants.MAX_YAW`, B (X) turns it right to `TurretConstants.MIN_YAW`,
   and Y (V) brings it back to face forward, `Radians.of(0)`.
-- Wire it with `m_blockBot.trackTurret(m_turret::getYawRadians);` and log `Turret/TargetRadians` and
-  `Turret/PositionRadians`.
+- Log `Turret/TargetRadians` from `periodic()`; the motor logs `Turret/PositionRadians`.
 
 Two things to notice:
 
@@ -675,7 +683,8 @@ pushed right, while the robot counts forward and left as positive. The **deadban
 that is nearly centred as exactly centred, so a real controller's slightly-off stick does not make
 the robot creep.
 
-`Drive` needs no `m_blockBot.track...` line: the 3D view already draws the drivetrain.
+Each module's motors log themselves too, as `Drive/FrontLeft/Wheel`, `Drive/FrontLeft/Steer` and so
+on.
 
 **Done when:** W, A, S and D slide the robot in every direction without it turning.
 
@@ -825,15 +834,15 @@ purpose and say why every time.
 - **Pressing a button does nothing.** The simulator must be enabled in Teleoperated, Keyboard 0 must
   be on Joystick[0], and the binding must be in `configureButtonBindings()`. Check you did not
   comment it out when you moved on to a new stage, and that you are pressing the right key: A is Z.
-- **It moves for an instant, then stops.** The voltage is set once instead of every loop: in
-  `initialize()` instead of `execute()`, or with `this.runOnce(...)` instead of `this.run(...)`. Or
-  the command finishes by itself: `isFinished()` returns `true`.
+- **It moves for an instant, then stops.** The command finishes by itself: `isFinished()` returns
+  `true`, or it is a `this.runOnce(...)`, and its `end()` stops the motor.
+- **It flies past the target and stays pinned at the end.** A closed-loop voltage was worked out
+  once, in `initialize()` (or `runOnce`), and the motor kept it. Work it out every loop, in
+  `execute()` (or `run`).
 - **The motor keeps going after you let go.** Nothing stops it when the command ends: put the stop in
-  `end()`, or use `runEnd(...)` or `.finallyDo(...)`.
-- **The graph moves, but the 3D view does not.** You have not called `m_blockBot.track...` for it in
-  `Robot`.
-- **The 3D view moves, but there is nothing to graph.** `periodic()` is not running. Call
-  `this.register()` at the end of the subsystem's constructor.
+  `end()`, or use `startEnd(...)`, `runEnd(...)` or `.finallyDo(...)`.
+- **A target is missing from the graph.** `periodic()` is not logging it, or the method is not
+  spelled `periodic` with `@Override` above it.
 - **A mechanism falls when you let go.** It has no default command. Set its hold command with
   `setDefaultCommand` in `Robot`.
 - **The intake frame jumps when you enable, or on its first move.** The motion profile still has
@@ -850,11 +859,14 @@ purpose and say why every time.
 - **It stops when you disable, and does not come back.** That is expected: disabling stops every
   command. Default commands come back by themselves when you enable again. A button you keep holding
   comes back too, because `RobotModeTriggers.teleop()` is part of its binding.
-- **An error says a swerve part is already taken.** You asked `Motors` for the same module twice.
-  Ask once and keep the motor in a field.
+- **An error says a motor is already taken.** You asked `Motors` for the same part twice, perhaps by
+  creating a subsystem twice. Ask once and keep the motor in a field.
 - **A module spins round and round.** Wrap the steering error with `MathUtil.angleModulus`.
-- **Do not edit `Motor`, `Motors`, `RobotPhysics` or `BlockBot`.** No stage needs to, and the
-  simulator depends on them.
+- **The 3D view shows a different robot (the KitBot).** AdvantageScope has not got the Block Bot
+  model. Double-click `scripts\setup-advantagescope.cmd`, then close AdvantageScope completely and
+  open it again.
+- **Do not edit `Motor`, `Motors`, `RobotPhysics`, `BlockBot` or `Simulation`.** No stage needs to,
+  and the simulator depends on them.
 
 ## House style
 
@@ -862,7 +874,7 @@ The code in this project follows a few rules. Following them keeps your code eas
 everyone else's:
 
 - Fields start with `m_`: `m_motor`, `m_target`.
-- A class calls its own methods with `this.`: `this.register()`, `this.addRequirements(...)`.
+- A class calls its own methods with `this.`: `this.addRequirements(...)`, `this.setTarget(...)`.
 - Command classes are named for what they do, verb first: `RunRoller`, `MoveElevator`,
   `HoldElevator`. Command factories are named the same way (`hold()`, `goTo(...)`,
   `driveWithSticks(...)`) and given a `.withName("<Mechanism>.<What>")` so the logs say which
@@ -870,5 +882,5 @@ everyone else's:
 - Constants are `UPPER_SNAKE_CASE` and live in your `<Name>Constants`.
 - Physical values carry their unit (`Distance`, `Angle`, `Voltage`), and you turn them into plain
   numbers with `.in(Meters)` or `.in(Radians)` only where you hand them to a motor.
-- Log keys are `<Mechanism>/<What><Unit>`, like `Elevator/PositionMeters`, so a graph always says
-  what it shows.
+- Log keys are `<Mechanism>/<What><Unit>`, like `Elevator/TargetMeters`, so a graph always says what
+  it shows.

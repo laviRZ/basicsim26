@@ -12,24 +12,23 @@ first stage.
 
 ## What you need
 
-- WPILib **2026** with VS Code. It installs Java, the WPILib simulator, and AdvantageScope.
-- A terminal. The helper scripts are PowerShell.
+- WPILib **2026** with its VS Code. It installs Java, the WPILib simulator, and AdvantageScope.
 
 ## 1. Build
 
-```powershell
+Get the project, with **Git: Clone** in VS Code or in a terminal:
+
+```
 git clone https://github.com/laviRZ/basicsim26.git
-cd basicsim26
-.\scripts\build.ps1
 ```
 
-Wait for `BUILD SUCCESSFUL`.
+Open the `basicsim26` folder in the WPILib VS Code. Press `Ctrl+Shift+P`, run **WPILib: Build Robot
+Code**, and wait for `BUILD SUCCESSFUL`.
 
 ## 2. Start the simulator
 
-```powershell
-.\scripts\sim.ps1
-```
+Press `Ctrl+Shift+P` and run **WPILib: Simulate Robot Code**. When it asks which extensions to use,
+keep **Sim GUI** ticked and press Enter.
 
 A **Robot Simulation** window opens. Before driving:
 
@@ -42,7 +41,11 @@ A **Robot Simulation** window opens. Before driving:
 
 ## 3. Add the 3D view
 
-Open AdvantageScope (installed with WPILib), then:
+First, give AdvantageScope the Block Bot model: in the project's `scripts` folder, double-click
+**`setup-advantagescope.cmd`**. Do it once, before you open AdvantageScope. Without it, the 3D view
+shows AdvantageScope's own KitBot instead.
+
+Then open AdvantageScope (installed with WPILib):
 
 1. **File → Connect to Simulator → NetworkTables 4 (AdvantageKit)** (or `Ctrl+Shift+K`).
 2. **File → Import Layout…** and choose `ascope/BlockBot.json`.
@@ -63,14 +66,14 @@ owns the roller's motor, and `RunRoller.java`, the command that spins it.
 Then in `Robot.java`:
 
 - construct the roller beside `m_blockBot`,
-- register its pose with `m_blockBot.trackFeeder(m_roller::getSpinRadians);`,
 - bind its command in `configureButtonBindings()`:
 
 ```java
 RobotModeTriggers.teleop().and(m_driverController.a()).whileTrue(new RunRoller(m_roller));
 ```
 
-[EXERCISES.md](EXERCISES.md) stage 1 has the details.
+[EXERCISES.md](EXERCISES.md) stage 1 has the details. Close the simulator window and run **WPILib:
+Simulate Robot Code** again to try your code.
 
 ## 5. Check it works
 
@@ -98,4 +101,9 @@ the real robot:
   `16: Keyboard 0`, and you must be holding Z. Its first LED lights while Z is held.
 - **No data in AdvantageScope.** Connect to the simulator again (`Ctrl+Shift+K`). Only one simulator
   can run at a time, so close any other Robot Simulation window first.
-- **The robot is missing from the 3D view.** Restart AdvantageScope after starting the simulator.
+- **The 3D view shows a different robot (the KitBot), or none.** Double-click
+  `scripts\setup-advantagescope.cmd`, then close AdvantageScope completely and open it again: it
+  loads robot models only when it starts. If it is still the KitBot, import `ascope/BlockBot.json`
+  again (step 3).
+- **The build fails because a file is in use.** A simulator is still running. Close its window and
+  build again.

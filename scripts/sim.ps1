@@ -3,10 +3,8 @@
 #   .\scripts\sim.ps1                # Sim GUI (Robot State / DS controls in-GUI)
 #   .\scripts\sim.ps1 --offline      # extra args are forwarded to Gradle untouched
 #
-# The Sim GUI extension is off in build.gradle unless the `simGui` project property is set:
-# GradleRIO turns a default-enabled extension into HALSIM_EXTENSIONS for the forked JVM, and
-# without it the HAL loads no extensions at all (what AdvantageKit log replay needs).
-# simulateJava depends on extractReleaseNative, so the natives exist before the fork.
+# The Sim GUI extension is enabled by default in build.gradle: GradleRIO turns a default-enabled
+# extension into HALSIM_EXTENSIONS for the forked JVM. simulateJava depends on extractReleaseNative, so the natives exist before the fork.
 # halsim_ds_socket stays disabled: it hands DS state to a real DriverStation and takes the GUI's
 # own Robot State controls out of the loop.
 
@@ -26,4 +24,4 @@ if ($env:APPDATA -and (Test-Path -LiteralPath $assets)) {
     Copy-Item -Path (Join-Path $assets '*') -Destination $userAssets -Recurse -Force
 }
 
-exit (Invoke-WpilibGradle -Root $root -GradleArgs (@('simulateJava', '-PsimGui', '--console=plain') + $args))
+exit (Invoke-WpilibGradle -Root $root -GradleArgs (@('simulateJava', '--console=plain') + $args))

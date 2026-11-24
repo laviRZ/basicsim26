@@ -5,29 +5,21 @@ import static edu.wpi.first.units.Units.Meters;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
-import java.util.function.DoubleSupplier;
 import org.littletonrobotics.junction.Logger;
 
 /**
  * Draws the Block Bot in AdvantageScope.
  *
- * <p>Infrastructure: students never call this and never touch a pose. A mechanism exposes its joint
- * state as plain numbers and {@link Robot} registers it once:
+ * <p>Infrastructure: students never call this and never touch a pose. Each joint is drawn from the
+ * motor {@link Motors} handed out for it, so a mechanism appears as soon as its subsystem asks for
+ * its motor and moves it; a part nobody has asked for sits at the model's reference pose. Every
+ * transform chain — the intake roller riding the frame, the hood riding the turret — is computed
+ * here, not in mechanism code.
  *
- * <pre>
- *   m_blockBot.trackCarriage(m_elevator::getHeightMeters);
- * </pre>
- *
- * <p>Each tracker takes a supplier in radians (or metres where noted), evaluated once per loop;
- * every transform chain — the intake roller riding the frame, the hood riding the turret — is
- * computed here, not in mechanism code. An unregistered joint reads zero, so it sits at the model's
- * reference pose instead of collapsing to the origin.
- *
- * <p>The drivetrain needs no registration. Its pose and its modules are drawn from the simulated
- * {@link Carpet} — where the robot really is, how each module is really steered and how far each
- * wheel has really turned — not from anything a subsystem reports. Code that never computes a
- * position still sees the robot move, and odometry, when it exists, is a separate estimate to
- * compare against this one.
+ * <p>The drivetrain is drawn from the simulated {@link Carpet} — where the robot really is, how
+ * each module is really steered and how far each wheel has really turned — not from anything a
+ * subsystem reports. Code that never computes a position still sees the robot move, and odometry,
+ * when it exists, is a separate estimate to compare against this one.
  *
  * <p>The array order is fixed by {@code assets/Robot_BlockBot/config.json}: entry {@code i} binds
  * {@code model_i.glb} to pose {@code i}.
@@ -59,60 +51,28 @@ public final class BlockBot {
   private static final double HOOD_OFFSET_Z = 0.09;
   private static final double WHEEL_Z = RobotPhysics.Drive.WHEEL_RADIUS.in(Meters);
 
-  private DoubleSupplier m_feederSpin = () -> 0.0;
-  private DoubleSupplier m_carriageHeight = () -> 0.0;
-  private DoubleSupplier m_intakeFrame = () -> 0.0;
-  private DoubleSupplier m_intakeRoller = () -> 0.0;
-  private DoubleSupplier m_turretYaw = () -> 0.0;
-  private DoubleSupplier m_hoodPitch = () -> 0.0;
-
-  /** Draws the feeder roller with the given spin angle, in radians at the roller. */
-  public void trackFeeder(DoubleSupplier spinRadians) {
-    m_feederSpin = spinRadians;
-  }
-
-  /** Draws the elevator carriage with the given height above its lowest position, in metres. */
-  public void trackCarriage(DoubleSupplier heightMeters) {
-    m_carriageHeight = heightMeters;
-  }
-
-  /**
-   * Draws the intake: the frame's stow angle in radians (0 is flat, {@code PI/2} is upright) and
-   * the roller's spin in radians.
-   */
-  public void trackIntake(DoubleSupplier frameRadians, DoubleSupplier rollerRadians) {
-    m_intakeFrame = frameRadians;
-    m_intakeRoller = rollerRadians;
-  }
-
-  /** Draws the turret at the given yaw, in radians. */
-  public void trackTurret(DoubleSupplier yawRadians) {
-    m_turretYaw = yawRadians;
-  }
-
-  /** Draws the hood at the given pitch, in radians. */
-  public void trackHood(DoubleSupplier pitchRadians) {
-    m_hoodPitch = pitchRadians;
+  /** Where a motor's joint is, or 0 (the reference pose) if nobody has asked for it. */
+  private static double at(Motor motor) {
+    return motor == null ? 0.0 : motor.getPosition();
   }
 
   /** Sends the robot frame and the fourteen component poses to AdvantageScope. */
   public void periodic() {
     Carpet carpet = Carpet.existing();
-    Pose3d turret =
-        new Pose3d(TURRET_X, 0, TURRET_Z, new Rotation3d(0, 0, m_turretYaw.getAsDouble()));
+    Pose3d turret = new Pose3d(TURRET_X, 0, TURRET_Z, new Rotation3d(0, 0, at(Motors.s_turret)));
     Pose3d intakeFramePose =
-        new Pose3d(INTAKE_X, 0, INTAKE_Z, new Rotation3d(0, -m_intakeFrame.getAsDouble(), 0));
+        new Pose3d(INTAKE_X, 0, INTAKE_Z, new Rotation3d(0, -at(Motors.s_intakeFrame), 0));
 
     Pose3d[] poses = {
-      new Pose3d(FEEDER_X, 0, FEEDER_Z, new Rotation3d(0, m_feederSpin.getAsDouble(), 0)),
-      new Pose3d(CARRIAGE_X, 0, CARRIAGE_Z0 + m_carriageHeight.getAsDouble(), Rotation3d.kZero),
+      new Pose3d(FEEDER_X, 0, FEEDER_Z, new Rotation3d(0, at(Motors.s_feederRoller), 0)),
+      new Pose3d(CARRIAGE_X, 0, CARRIAGE_Z0 + at(Motors.s_elevator), Rotation3d.kZero),
       intakeFramePose,
       intakeFramePose.transformBy(
           new Transform3d(
-              INTAKE_ROLLER_OFFSET_X, 0, 0, new Rotation3d(0, -m_intakeRoller.getAsDouble(), 0))),
+              INTAKE_ROLLER_OFFSET_X, 0, 0, new Rotation3d(0, -at(Motors.s_intakeRoller), 0))),
       turret,
       turret.transformBy(
-          new Transform3d(0, 0, HOOD_OFFSET_Z, new Rotation3d(0, m_hoodPitch.getAsDouble(), 0))),
+          new Transform3d(0, 0, HOOD_OFFSET_Z, new Rotation3d(0, at(Motors.s_hood), 0))),
       null,
       null,
       null,

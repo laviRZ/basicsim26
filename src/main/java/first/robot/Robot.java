@@ -11,16 +11,17 @@ import org.littletonrobotics.junction.wpilog.WPILOGWriter;
  * Robot container: owns the mechanisms, publishes telemetry, and binds driver buttons.
  *
  * <p>Start with {@code subsystems/roller/}: write the {@code Roller} subsystem and its {@code
- * RunRoller} command, construct the roller beside {@code m_blockBot}, register it with {@code
- * m_blockBot.trackFeeder(m_roller::getSpinRadians)}, and bind its command in {@link
- * #configureButtonBindings()}. Default commands ({@code setDefaultCommand}) are set here too.
+ * RunRoller} command, construct the roller beside {@code m_blockBot}, and bind its command in
+ * {@link #configureButtonBindings()}. Default commands ({@code setDefaultCommand}) are set here
+ * too.
  *
- * <p>The swerve drivetrain needs no registration: {@link BlockBot} draws it from the simulated
- * carpet, where the robot really is, whatever the drive code believes.
+ * <p>Nothing registers with the 3D view: {@link BlockBot} draws each part from its motor, and the
+ * swerve drivetrain from the simulated carpet, where the robot really is, whatever the drive code
+ * believes.
  *
- * <p>Every loop, in this order: the scheduler runs each subsystem's periodic method — the motor
- * steps its physics, then the mechanism logs its state — then polls triggers and runs commands.
- * Finally {@link BlockBot} samples the mechanisms and publishes their poses.
+ * <p>Every loop, in this order: the simulated world steps — each motor applies its voltage, moves
+ * and logs its state — then the scheduler runs each subsystem's periodic method, polls triggers and
+ * runs commands. Finally {@link BlockBot} publishes the poses.
  */
 public class Robot extends LoggedRobot {
   private final BlockBot m_blockBot = new BlockBot();
@@ -65,11 +66,14 @@ public class Robot extends LoggedRobot {
   /** This function is called periodically during all modes. */
   @Override
   public void robotPeriodic() {
-    // Runs each subsystem's periodic (motor physics and mechanism state logging), then triggers,
-    // commands and default commands.
+    // The simulated world moves first: every motor turns with the voltage it was last given, and
+    // logs its position, velocity and voltage. On a real robot this happens by itself.
+    Simulation.step();
+
+    // Then each subsystem's periodic, then triggers, commands and default commands.
     CommandScheduler.getInstance().run();
 
-    // After the mechanisms have updated, send their poses to AdvantageScope.
+    // Send the poses to AdvantageScope.
     m_blockBot.periodic();
   }
 }

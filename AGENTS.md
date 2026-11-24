@@ -12,6 +12,12 @@ in `src/main/java/first/robot`. Student-facing briefs: `EXERCISES.md`.
 .\scripts\sim.ps1            # desktop sim with Sim GUI; extra args go to Gradle
 ```
 
+Students use VS Code's **WPILib: Build Robot Code** / **WPILib: Simulate Robot Code** and never these
+scripts: Windows blocks PowerShell scripts by default. Their one script is
+`scripts\setup-advantagescope.cmd` (a batch file, not subject to the execution policy), which mirrors
+`assets/Robot_BlockBot` into AdvantageScope's user assets with `robocopy /MIR`. `.gitattributes` keeps
+`*.cmd` CRLF: batch files misread labels with LF endings.
+
 JDK: `scripts/_common.ps1` uses `$env:JAVA_HOME`, else the WPILib JDK for `.wpilib/wpilib_preferences.json`'s
 `projectYear`, else the newest `%PUBLIC%\wpilib\*\jdk`. Project targets Java 17.
 
@@ -22,24 +28,26 @@ Stop the sim before `build.ps1`: a running sim holds the JNI natives in `build/j
 
 |Path|Owner|Rule|
 |---|---|---|
-|`Motor.java`|infrastructure|the hardware seam: volts in, position/velocity out; the sim lives behind it|
-|`Motors.java`|infrastructure|the given physical world: one described motor per joint, plus the gyro|
+|`Motor.java`|infrastructure|the hardware seam: volts in, position/velocity out; latches, logs itself; the sim lives behind it|
+|`Motors.java`|infrastructure|the given physical world: one described, named motor per joint (each claimed once), plus the gyro|
+|`Simulation.java`|infrastructure, package-private|steps every motor and the carpet, then logs every motor; `Robot` calls it first each loop|
 |`Carpet.java`|infrastructure, package-private|the drivetrain's world: wheel grip and slip, walls, the true pose|
 |`Gyro.java`|infrastructure|the gyro seam: yaw and yaw rate, nothing about position|
 |`RobotPhysics.java`|infrastructure|the plant in one unit-typed table: gearing, inertia, mass, gravity; given, read-only|
-|`BlockBot.java`|infrastructure|draws the six joints; holds every transform chain|
-|`Robot.java`|infrastructure, one line per stage|receivers, mechanism fields, `m_blockBot.track*`, bindings|
+|`BlockBot.java`|infrastructure|draws the six joints from the motors `Motors` handed out; holds every transform chain|
+|`Robot.java`|infrastructure, one line per stage|receivers, mechanism fields, default commands, bindings|
 |`Constants.java`|shared|robot-wide values: loop period, controller port, field size, start pose|
-|`subsystems/<name>/`|students|one `Subsystem` class, its commands, and its `<Name>Constants`|
+|`subsystems/<name>/`|students|one `SubsystemBase` class, its commands, and its `<Name>Constants`|
 |`assets/Robot_BlockBot/`|generated|never hand-edit; regenerate with the tool below|
 
-A mechanism owns its motor and exposes joint state as plain numbers; it never constructs a `Pose3d`,
-never imports `BlockBot`, and never imports `edu.wpi.first.wpilibj.simulation`. `Robot` registers each with
-`m_blockBot.trackFeeder(m_roller::getSpinRadians)` and so on, and `BlockBot` alone knows the geometry
-(including the intake-roller-on-frame and hood-on-turret chains). An unregistered joint reads zero, so
-it sits at the model's reference pose.
+A mechanism owns its motor; it never constructs a `Pose3d`, never imports `BlockBot`, and never
+imports `edu.wpi.first.wpilibj.simulation`. Nothing registers with the 3D view: `Motors` keeps each
+motor it hands out (package-private `s_*` fields), `BlockBot` reads their positions, and `BlockBot`
+alone knows the geometry (including the intake-roller-on-frame and hood-on-turret chains). A joint
+nobody asked for reads zero, so it sits at the model's reference pose. Students therefore write no
+pose getters and no `::` before the pause.
 
-The drivetrain is the exception, on purpose: nothing registers it. `BlockBot` draws the robot pose,
+The drivetrain is drawn the same way, on purpose. `BlockBot` draws the robot pose,
 the steering pods and the wheels from `Carpet` — where the robot really is, not where any subsystem
 says — so the robot drives before students write odometry, and their odometry (`Drive/EstimatedPose`,
 drawn as a ghost) is an estimate to compare against it. `Carpet` is package-private so student code
@@ -60,6 +68,19 @@ means adding a factory in `Motor`. Swerve adds two: `rotor` (`DCMotorSim`, unlim
 steering) and `steppedBy`, a motor whose physics another class steps — the drive wheels, which
 `Carpet` steps because a wheel's speed depends on whether it grips.
 
+**The motor behaves like a motor controller, and logs itself.** `setVoltage` latches: the motor keeps
+the last request until another, as Phoenix 6 does, so an open-loop command sets it once in
+`initialize` and closed loop recomputes in `execute`. `Simulation.step()`, the first line of
+`Robot.robotPeriodic`, applies each request (0 while `DriverStation.isDisabled()`, clamped to the
+battery voltage), steps every self-stepping motor in creation order (so steer rotors precede the
+carpet), steps the carpet, then logs `<Name>/Position<Unit>`, `<Name>/Velocity<Unit>PerSecond` and
+`<Name>/AppliedVolts` for every motor, under the name `Motors` gives it (`Roller`, `Elevator`,
+`Intake/Frame`, `Intake/Roller`, `Hood`, `Turret`, `Drive/<Module>/Wheel|Steer`). Because the world
+steps before the scheduler, subsystem periodics and commands see this loop's state whatever order the
+subsystems were constructed in — which is what lets students `extends SubsystemBase` (registered in
+its constructor, before its motor field exists). Tests call `Simulation.reset()` and
+`Simulation.step()`, and must enable the robot with `DriverStationSim`.
+
 **The carpet.** `Carpet` owns the four drive wheels, the four steer rotors and the gyro, created
 together on the first `Motors.swerveDrive/swerveSteer/gyro` call (each may be claimed once) and
 stepped after the steer rotors each loop, in 20 substeps. Each wheel pushes with the current-limited
@@ -74,15 +95,16 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
 ## Conventions
 
 - Member fields are `m_camelCase`. A class calls its own methods with an explicit `this.`
-  (`this.configureButtonBindings()`, `this.register()`, `this.addRequirements(...)`);
+  (`this.configureButtonBindings()`, `this.addRequirements(...)`, `this.setTarget(...)`);
   static constants stay `UPPER_SNAKE_CASE`.
 - Physical constants are unit-typed (`Distance`, `Angle`, `Voltage`, `MomentOfInertia`, `Mass`,
   `Time`), never bare doubles; convert with `.in(unit)` only at the `Motor` seam.
 - `build.gradle` wires `spotlessApply` into `compileJava`, so builds silently reformat; `lint.ps1` is
   the real formatting gate.
-- The Sim GUI is off in `build.gradle` (`wpi.sim.addGui().defaultEnabled` is false unless the
-  `simGui` project property is set). `sim.ps1` passes `-PsimGui` to `simulateJava`, and GradleRIO
-  turns a default-enabled extension into `HALSIM_EXTENSIONS` for the forked JVM. `halsim_ds_socket`
+- The Sim GUI is on in `build.gradle` (`wpi.sim.addGui().defaultEnabled = true`): GradleRIO turns a
+  default-enabled extension into `HALSIM_EXTENSIONS` for `simulateJava`, and writes it as
+  `defaultEnabled` into `build/sim/release_java.json`, which VS Code's Simulate Robot Code reads to
+  pre-tick its extension picker. Tests do not load it. `halsim_ds_socket`
   stays disabled: enabling it hands DS state to a real DriverStation and removes the Sim GUI's own
   Robot State window.
 - **Commands: classes, then factories.** Stages 1–2 of `EXERCISES.md` teach each command as a
@@ -94,12 +116,13 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   `runEnd`, `startEnd`, plus `finallyDo`, `until`, `withName`), and has students rewrite stages 1–2
   as factories; from stage 3 on, commands are factories (`hold()`, `goTo(...)`, `spinRoller()`,
   `driveWithSticks(DoubleSupplier...)`). Student-facing text before the pause must not require
-  lambdas, suppliers or factories; the `m_blockBot.track*(m_x::getY)` method references are copied
-  as-is until the pause explains them.
+  lambdas, suppliers, method references or factories. Stage 1 also teaches what `addRequirements`
+  does (one command per subsystem; the old one gets `end(true)`; forgetting it is silent), and stage
+  2 shows it through the default command handing the elevator over.
 - **Default commands are scheduled automatically.** `Robot` sets each positional joint's hold
   command (`new HoldElevator(...)`, later `m_x.hold()`) with `setDefaultCommand`, and v2 runs it whenever nothing else requires the subsystem;
-  the default must require only its own subsystem. Every subsystem registers itself with
-  `this.register()` as the last line of its constructor.
+  the default must require only its own subsystem. Subsystems `extends SubsystemBase`, which
+  registers them in its constructor.
 - Bindings live in the `Robot` constructor, on the scheduler's default `EventLoop`, which is polled
   every loop — disabled included. `whileTrue` is what makes a held button resume after a disable:
   `RobotModeTriggers.teleop()` is `isTeleopEnabled()` (mode **and** enabled), so the composed
@@ -119,12 +142,8 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   Those numbers were measured on the simulated plants; re-measure before changing the plant or gains.
 - Simulators enforce their limits (`Math.clamp` inside `update`); a command should still not ask for
   travel the mechanism does not have.
-- A mechanism posts its own state by overriding `periodic()`, and registers at the end of its
-  constructor with `this.register()`. Commands v2 calls
-  `periodic()` every loop, and `CommandScheduler.run()` calls periodics in subsystem **registration
-  order**; `Motor` registers its physics step the moment it is constructed, so registering the
-  mechanism afterwards is what makes the step precede the log and the commands. It records
-  `<Name>/Target<Unit>` where a target exists and `<Name>/Position<Unit>` (or velocity) always, as
+- The motor logs position, velocity and applied volts; a mechanism logs only what its own code knows
+  — `<Name>/Target<Unit>`, profile setpoints, `AtTarget`, the estimated pose — from `periodic()`, as
   base-unit doubles. `Robot` never calls a mechanism to log.
 - Comments say what the code cannot — units, physical meaning, why — and never restate a constant's
   value: the constant is the only source of truth, so a comment beside it silently rots.
@@ -192,8 +211,9 @@ and rollers and wheels show their spin with `striped()` wedges of alternating co
 boxes pushed through a cylinder. Build new parts the same way.
 
 **It also copies the set into `%APPDATA%\AdvantageScope\userAssets\Robot_BlockBot`, the only folder the
-viewer reads; `scripts/sim.ps1` performs the same mirror on every run, so a fresh clone draws the robot
-without running the generator. Regenerate after every geometry edit and restart AdvantageScope, which caches models per
+viewer reads; `scripts/setup-advantagescope.cmd` (students, once) and `scripts/sim.ps1` (every run)
+perform the same mirror, so a fresh clone draws the robot without running the generator. Without it
+AdvantageScope silently falls back to its KitBot. Regenerate after every geometry edit and restart AdvantageScope, which caches models per
 session — editing the repo assets alone leaves the viewer drawing stale geometry against the new poses,
 which looks exactly like parts colliding or floating off their pivots.**
 
