@@ -1,24 +1,26 @@
 """Translate the English docs into Hebrew and Spanish with Claude.
 
 English is the only source of truth: README.md and EXERCISES.md at the repository root. This
-script writes generated translations to docs/i18n/<lang>/<FILE>.md, which nobody edits by hand;
-to change a translation, change the English (or this script's context) and run it again.
+script writes generated translations to docs/i18n/<lang>/<FILE>.md, which is gitignored and never
+committed: the site build publishes it. To change a translation, change the English (or this
+script's context).
 
 Each page is split into sections at its level-2 headings. A section is translated only when its
-English text changed since the last run (docs/i18n/<lang>/<FILE>.sections.json remembers a hash of
-the English each translation came from), so a one-line edit retranslates one section, and the
-review diff shows only what changed.
+English text changed since the last run: docs/i18n/<lang>/<FILE>.sections.json remembers a hash of
+the English each translation came from. The workflow keeps those cache files as a build artifact
+and starts each run from the last one, so a one-line edit retranslates one section.
 
 Every translation is checked before it is kept: code blocks, link and image targets, and the
 heading and table structure must match the English exactly. A section that fails is retried with
-the failure explained, and the run stops rather than write a broken page.
+the failure explained, and the run stops rather than keep a broken section. Progress is saved
+after every section; a section not translated yet shows in English, and the site marks that page
+as behind.
 
     python tools/translate_docs.py            # translate what changed (needs ANTHROPIC_API_KEY)
     python tools/translate_docs.py --check    # list stale sections, call nothing
     python tools/translate_docs.py --fake     # fill in placeholder "translations" for testing
 
-The GitHub workflow .github/workflows/docs-translate.yml runs it on every push to master and opens
-a pull request with the result.
+The GitHub workflow .github/workflows/docs-site.yml runs it before building the site.
 """
 
 from __future__ import annotations
@@ -335,32 +337,44 @@ def main() -> None:
             todo = [i for i, text in enumerate(translated) if text is None]
             print(f"{name} {source}: {len(todo)} of {len(sections)} section(s) to translate")
 
+            save(language, source, sections, translated)
             for i in todo:
                 print(f"  {first_line(sections[i])}")
                 if args.fake:
                     translated[i] = fake_section(language, sections[i])
-                    continue
-                so_far = "".join(
-                    text if text is not None else f"[{first_line(sections[j])}: not translated yet]\n\n"
-                    for j, text in enumerate(translated)
-                    if j != i
-                )
-                translated[i] = translate_section(client, language, document, so_far, sections[i])
+                else:
+                    so_far = "".join(
+                        text
+                        if text is not None
+                        else f"[{first_line(sections[j])}: not translated yet]\n\n"
+                        for j, text in enumerate(translated)
+                        if j != i
+                    )
+                    translated[i] = translate_section(
+                        client, language, document, so_far, sections[i]
+                    )
+                save(language, source, sections, translated)
 
-            out_dir = I18N_DIR / language
-            out_dir.mkdir(parents=True, exist_ok=True)
-            # Only the current sections are kept, so retired English text drops out of the cache.
-            entries = [
-                {"source_sha256": section_hash(section), "translation": text}
-                for section, text in zip(sections, translated)
-            ]
-            cache_path(language, source).write_text(
-                json.dumps({"model": MODEL, "sections": entries}, ensure_ascii=False, indent=2)
-                + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            (out_dir / source).write_text("".join(translated), encoding="utf-8", newline="\n")
+
+def save(language: str, source: str, sections: list[str], translated: list[str | None]) -> None:
+    """Writes the page and its cache; a section not translated yet appears in English."""
+    out_dir = I18N_DIR / language
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Only current sections are kept, so retired English text drops out of the cache.
+    entries = [
+        {"source_sha256": section_hash(section), "translation": text}
+        for section, text in zip(sections, translated)
+        if text is not None
+    ]
+    cache_path(language, source).write_text(
+        json.dumps({"model": MODEL, "sections": entries}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    page = "".join(
+        section if text is None else text for section, text in zip(sections, translated)
+    )
+    (out_dir / source).write_text(page, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

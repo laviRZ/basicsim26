@@ -1,7 +1,12 @@
-# Builds the docs website (English, Hebrew, Spanish) and publishes it to GitHub Pages.
+# Translates the English docs (README.md, EXERCISES.md) into Hebrew and Spanish with Claude, builds
+# the docs website, and publishes it to GitHub Pages. Nothing is committed back to the repository:
+# the translations exist in the published site, and their cache in this workflow's build artifact
+# "docs-translations", which each run picks up from the last one.
 #
-# Needs, once, in the repository settings: Pages > Build and deployment > Source: "GitHub
-# Actions".
+# Needs, once, in the repository settings:
+#   - Pages > Build and deployment > Source: "GitHub Actions".
+#   - Secrets and variables > Actions: a secret named ANTHROPIC_API_KEY. Without it the site still
+#     publishes, with the English pages and whatever translations it had.
 name: Docs site
 
 on:
@@ -18,9 +23,11 @@ on:
 
 permissions:
   contents: read
+  actions: read # to fetch the previous run's translation cache
   pages: write
   id-token: write
 
+# One run at a time, so two quick pushes never translate the same sections twice.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -28,6 +35,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +47,42 @@ jobs:
           cache-dependency-path: docs/requirements.txt
 
       - run: pip install -r docs/requirements.txt
+
+      # Start from the translations the last run kept, so only English that changed since is
+      # translated again. Artifacts expire after 90 days; with none, every section starts fresh.
+      - name: Find the last translation cache
+        id: cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          query="repos/$GITHUB_REPOSITORY/actions/artifacts?name=docs-translations&per_page=1"
+          run_id=$(gh api "$query" --jq '.artifacts[0].workflow_run.id // empty')
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        if: steps.cache.outputs.run_id != ''
+        with:
+          name: docs-translations
+          path: docs/i18n
+          run-id: ${{ steps.cache.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # A failed or missing translation must not hold back the English: the build still runs, and
+      # pages left behind are marked as such.
+      - name: Translate what changed
+        if: env.HAS_API_KEY == 'true'
+        continue-on-error: true
+        run: python tools/translate_docs.py
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # Kept even if a later step fails, so translations already paid for are not lost.
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('docs/i18n/*/*.sections.json') != ''
+        with:
+          name: docs-translations
+          path: docs/i18n
+          retention-days: 90
 
       - name: Build the site
         run: python tools/build_docs_site.py

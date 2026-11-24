@@ -224,22 +224,26 @@ Generated sim state (`simgui*.json`, `networktables.json`) and `logs/` are gitig
 `README.md` and `EXERCISES.md` are the only source of truth; the website at
 <https://lavirz.github.io/basicsim26/> (GitHub Pages) shows them in English, Hebrew and Spanish.
 
+Translations are never committed: they exist only in the published site and, as a cache, in the
+workflow's `docs-translations` build artifact.
+
 - `tools/translate_docs.py` splits each page at its `## ` headings and translates only sections whose
   English changed, with `claude-opus-5-5` (adaptive thinking, effort `high`, server-side refusal
   fallbacks). It caches by a hash of each English section in `docs/i18n/<lang>/<Page>.sections.json`
-  and writes `docs/i18n/<lang>/<Page>.md`. Those files are generated: never hand-edit them, and
-  spotless skips them. There is deliberately no glossary; the model gets the project, audience and
-  "what the student does with this text" as context (`CONTEXT` in the script). A translation must
-  keep code blocks, link targets, headings and table rows identical or it is retried, then the run
-  fails. `--check` lists stale sections; `--fake` writes structural placeholders for offline tests.
-- `.github/workflows/docs-translate.yml` runs it on pushes to `master` that touch the pages and opens
-  or updates one pull request (`docs/translations`) for review; it starts from that branch's
-  `docs/i18n` so unmerged work is not paid for twice. Needs the `ANTHROPIC_API_KEY` repository
-  secret and "Allow GitHub Actions to create and approve pull requests".
-- `tools/build_docs_site.py` lays the pages out in `build/docs-site-src/` and runs MkDocs Material
-  with `mkdocs-static-i18n` (`mkdocs.yml`, folder structure, English default with fallback) into
-  `build/docs-site/`; `--serve` previews locally. A translation behind the English gets a note
-  linking the English page (absolute URL: MkDocs rewrites relative links across languages). Hebrew
-  is right-to-left with code kept left-to-right by the CSS in that script.
-  `.github/workflows/docs-site.yml` builds and deploys it on pushes to `master`; Pages' source must
-  be "GitHub Actions". Python versions are pinned in `docs/requirements.txt`.
+  (gitignored, skipped by spotless), saving after every section; a section not translated yet shows
+  in English. There is deliberately no glossary; the model gets the project, audience and "what the
+  student does with this text" as context (`CONTEXT` in the script). A translation must keep code
+  blocks, link targets, headings and table rows identical or it is retried, then the run fails.
+  `--check` lists stale sections; `--fake` writes structural placeholders for offline tests.
+- `tools/build_docs_site.py` builds each translated page from that cache (no `.md` needed), lays the
+  pages out in `build/docs-site-src/` and runs MkDocs Material with `mkdocs-static-i18n`
+  (`mkdocs.yml`, folder structure, English default with fallback) into `build/docs-site/`; `--serve`
+  previews locally. A page with any untranslated section gets a note linking the English page (absolute URL: MkDocs
+  rewrites relative links across languages). Hebrew is right-to-left with code kept left-to-right
+  by the CSS in that script.
+- `.github/workflows/docs-site.yml`, on pushes to `master` that touch the docs: downloads the newest
+  `docs-translations` artifact (found through the artifacts API, kept 90 days; after that every
+  section is translated again), translates
+  what changed if the `ANTHROPIC_API_KEY` secret exists (`continue-on-error`, so English updates
+  always publish), uploads the cache as a new artifact even if a later step fails, builds and
+  deploys. Pages' source is "GitHub Actions"; Actions needs no write access to the repository. Python versions are pinned in `docs/requirements.txt`.

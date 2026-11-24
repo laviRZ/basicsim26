@@ -1,18 +1,17 @@
 """Build the docs website: the English pages and their Hebrew and Spanish translations.
 
 The English pages are README.md and EXERCISES.md at the repository root, used as they are. The
-translations are the generated files in docs/i18n/<lang>/ (see tools/translate_docs.py). This
+translations come from the cache files in docs/i18n/<lang>/ (see tools/translate_docs.py). This
 script lays them out for MkDocs in build/docs-site-src/ and builds build/docs-site/:
 
     python tools/build_docs_site.py           # build
     python tools/build_docs_site.py --serve   # build and preview at http://127.0.0.1:8000
 
-A translation that is behind the English gets a note at the top pointing to the English page,
-until the translation pull request for it is merged. A page with no translation at all shows
-the English.
+A translation that is behind the English (a run that stopped part-way, or no API key) gets a note
+at the top pointing to the English page. A page with no translation at all shows the English.
 
-The GitHub workflow .github/workflows/docs-site.yml runs it on every push to master and
-publishes the result to GitHub Pages.
+The GitHub workflow .github/workflows/docs-site.yml translates, runs this, and publishes the
+result to GitHub Pages on every push to master.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from translate_docs import I18N_DIR, LANGUAGES, ROOT, SOURCES, stale_sections
+from translate_docs import I18N_DIR, LANGUAGES, ROOT, SOURCES, load_cache, section_hash, split_sections
 
 SITE_SRC = ROOT / "build" / "docs-site-src"
 IMAGES = ROOT / "docs" / "images"
@@ -81,11 +80,15 @@ def lay_out() -> None:
 
     for language in LANGUAGES:
         for source in SOURCES:
-            translation = I18N_DIR / language / source
-            if not translation.exists():
+            # The page is put together from the cache, so it needs nothing but the cache files the
+            # workflow downloads: each English section's translation, or the English itself.
+            cache = load_cache(language, source)
+            if not cache:
                 continue
-            text = adapt(translation.read_text(encoding="utf-8"))
-            if stale_sections(language, source):
+            english = split_sections((ROOT / source).read_text(encoding="utf-8"))
+            parts = [cache.get(section_hash(section)) for section in english]
+            text = adapt("".join(part or section for part, section in zip(parts, english)))
+            if None in parts:
                 note = STALE_NOTE[language].format(english=site_url() + ENGLISH_PATHS[source])
                 title, _, rest = text.partition("\n")
                 text = f"{title}\n\n!!! warning \"\"\n    {note}\n{rest}"
