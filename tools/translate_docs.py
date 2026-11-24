@@ -38,6 +38,11 @@ I18N_DIR = ROOT / "docs" / "i18n"
 MODEL = "claude-opus-5-5"
 MAX_ATTEMPTS = 3
 
+NO_CREDENTIALS = (
+    "No Claude API credentials. Set ANTHROPIC_API_KEY: on GitHub, add a repository secret of that "
+    "name under Settings > Secrets and variables > Actions."
+)
+
 FENCE = re.compile(r"^(```|~~~)")
 LINK_TARGET = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
@@ -223,6 +228,11 @@ def translate_section(
             sys.exit(f"The Claude API returned {error.status_code}: {error.message}")
         except anthropic.APIConnectionError:
             sys.exit("Could not reach the Claude API.")
+        except TypeError as error:
+            # The SDK finds out it has no credentials only when it sends the first request.
+            if "authentication" not in str(error):
+                raise
+            sys.exit(NO_CREDENTIALS)
 
         if response.stop_reason == "refusal":
             sys.exit(f"Claude declined to translate a section into {LANGUAGES[language]}.")
@@ -314,10 +324,7 @@ def main() -> None:
         try:
             client = anthropic.Anthropic()
         except anthropic.AnthropicError as error:
-            sys.exit(
-                "No Claude API credentials: set ANTHROPIC_API_KEY (in GitHub, the repository "
-                f"secret of that name). ({error})"
-            )
+            sys.exit(f"{NO_CREDENTIALS} ({error})")
 
     for language, name in LANGUAGES.items():
         for source in SOURCES:
