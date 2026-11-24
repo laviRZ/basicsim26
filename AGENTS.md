@@ -85,15 +85,19 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   turns a default-enabled extension into `HALSIM_EXTENSIONS` for the forked JVM. `halsim_ds_socket`
   stays disabled: enabling it hands DS state to a real DriverStation and removes the Sim GUI's own
   Robot State window.
-- **Commands are classes first.** Students write each command as a `Command` subclass in its
-  mechanism's folder (`RunRoller`, `HoldElevator`, `MoveElevator`), overriding `initialize`,
-  `execute`, `isFinished` and `end` and calling `this.addRequirements(subsystem)`; the subsystem
-  exposes plain methods for them (`spin()`, `setTarget(...)`, `driveToTarget()`). Command factories
-  (`this.run(...)`, `finallyDo`) and suppliers are an optional later section of `EXERCISES.md`, so
-  student-facing text and hints must not require them before then; the drive command takes the
-  `CommandXboxController` itself rather than `DoubleSupplier`s.
-- **Default commands are scheduled automatically.** `Robot` sets each positional joint's
-  `Hold<Name>` with `setDefaultCommand`, and v2 runs it whenever nothing else requires the subsystem;
+- **Commands: classes, then factories.** Stages 1–2 of `EXERCISES.md` teach each command as a
+  `Command` subclass in its mechanism's folder (`RunRoller`, `HoldElevator`, `MoveElevator`),
+  overriding `initialize`, `execute`, `isFinished` and `end` and calling
+  `this.addRequirements(subsystem)`; the subsystem exposes plain methods for them (`spin()`,
+  `setTarget(...)`, `driveToTarget()`). A pause after stage 2 teaches lambdas, method references,
+  suppliers, captured variables and the `Subsystem` factories (`run`, `runOnce`, `startRun`,
+  `runEnd`, `startEnd`, plus `finallyDo`, `until`, `withName`), and has students rewrite stages 1–2
+  as factories; from stage 3 on, commands are factories (`hold()`, `goTo(...)`, `spinRoller()`,
+  `driveWithSticks(DoubleSupplier...)`). Student-facing text before the pause must not require
+  lambdas, suppliers or factories; the `m_blockBot.track*(m_x::getY)` method references are copied
+  as-is until the pause explains them.
+- **Default commands are scheduled automatically.** `Robot` sets each positional joint's hold
+  command (`new HoldElevator(...)`, later `m_x.hold()`) with `setDefaultCommand`, and v2 runs it whenever nothing else requires the subsystem;
   the default must require only its own subsystem. Every subsystem registers itself with
   `this.register()` as the last line of its constructor.
 - Bindings live in the `Robot` constructor, on the scheduler's default `EventLoop`, which is polled
@@ -101,12 +105,13 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   `RobotModeTriggers.teleop()` is `isTeleopEnabled()` (mode **and** enabled), so the composed
   condition falls on disable and rises again on re-enable, and `whileTrue` schedules on the rise and
   cancels on the fall. A disabled robot cancels commands that do not run while disabled, and
-  `schedule()` refuses to start them. A command's `end(interrupted)` is what puts a mechanism back at
-  rest on cancel — it runs on interruption and on normal end alike.
+  `schedule()` refuses to start them. A command's `end(interrupted)` (or `runEnd`/`finallyDo`) is
+  what puts a mechanism back at rest on cancel — it runs on interruption and on normal end alike.
 - Control split: rollers are open loop (`setVoltage`); every positional joint is closed loop
-  (`KP * (target − position)`), with a `Hold<Name>` command as the default and a `Move<Name>`
-  command, whose `initialize` sets the target, as the move. A pure P loop settles below target when gravity is simulated — that steady-state error is
-  deliberate teaching material, not a bug to paper over.
+  (`KP * (target − position)`), with a hold command as the default and a move command that sets the
+  target as it starts (`MoveElevator.initialize`, later `startRun` in `goTo(...)`). A pure P loop
+  settles below target when gravity is simulated — that steady-state error is deliberate teaching
+  material, not a bug to paper over.
 - Simulators enforce their limits (`Math.clamp` inside `update`); a command should still not ask for
   travel the mechanism does not have.
 - A mechanism posts its own state by overriding `periodic()`, and registers at the end of its

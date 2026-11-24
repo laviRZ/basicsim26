@@ -12,6 +12,8 @@ The stages, in order:
 
 1. **Roller**: spin a motor while a button is held.
 2. **Elevator**: move to a height and stay there.
+
+   Then a pause to learn lambdas, suppliers and a shorter way to write commands.
 3. **Intake**: two motors in one mechanism.
 4. **Hood**: the elevator's idea again, but tilting.
 5. **Turret**: turn the shooter around.
@@ -186,7 +188,7 @@ In `Robot.java`:
 
 1. Create the roller next to `m_blockBot`: `private final Roller m_roller = new Roller();`
 2. In the constructor, let the 3D view see it: `m_blockBot.trackFeeder(m_roller::getSpinRadians);`
-   The `::` hands the 3D view the method itself, so it can ask for the angle every loop.
+   Copy the `::` as it is for now; the pause after stage 2 explains it.
 3. In `configureButtonBindings()`, run the command while A is held:
 
 ```java
@@ -289,39 +291,164 @@ to the gap? Could anything else in the formula cancel gravity?
 **Done when:** the carriage rises smoothly, stops near the top, stays there when you let go, and you
 can explain the gap.
 
+## Pause: lambdas, suppliers and shorter commands
+
+You have written three command classes, and `HoldElevator` and `MoveElevator` are nearly the same
+file. Before stage 3, learn four pieces of Java that WPILib uses everywhere. Then you can write each of
+those commands in a line or two, inside the subsystem.
+
+### Lambdas: code you hand to someone else
+
+```java
+() -> m_motor.stop()
+```
+
+This is a **lambda**: a piece of code with no name, which you can store or pass to a method like any
+other value. The `()` holds its inputs (here none), and after the arrow is what it does. Writing it
+does not run it. Whoever you give it to runs it, whenever they choose, as many times as they like.
+
+When it needs more than one statement, use braces:
+
+```java
+() -> {
+  m_target = height;
+  this.driveToTarget();
+}
+```
+
+### Method references: a lambda that only calls one method
+
+`this::stop` means the same as `() -> this.stop()`. You have used one since stage 1:
+
+```java
+m_blockBot.trackFeeder(m_roller::getSpinRadians);
+```
+
+That hands the 3D view the roller's `getSpinRadians` method itself, not its answer, and the 3D view
+calls it every loop.
+
+### Suppliers: asking for a value later
+
+A lambda that returns a value is a **supplier**: a way to ask for the value later. A `DoubleSupplier`
+returns a `double`, and you ask it with `getAsDouble()`:
+
+```java
+DoubleSupplier forward = () -> -m_driverController.getLeftY();
+double now = forward.getAsDouble();   // reads the stick at this moment
+```
+
+That is why `trackFeeder` takes a supplier. The 3D view needs the roller's angle **every loop**, not
+the angle at the moment `Robot` was built, so you give it a way to ask. Buttons work the same way: a
+binding asks "is A pressed?" every loop, through a `BooleanSupplier` inside it.
+
+### Captured variables
+
+A lambda can use the variables around it, such as a method's parameters:
+
+```java
+public Command goTo(Distance height) {
+  return this.run(() -> {
+    m_target = height;   // the lambda remembers height, long after goTo() returned
+    this.driveToTarget();
+  });
+}
+```
+
+Each call of `goTo` makes a new lambda that remembers its own `height`. Java only lets a lambda use a
+local variable or parameter that is never changed after it is set.
+
+### Command factories
+
+Every subsystem has methods that turn lambdas into commands, and each command they make already
+requires that subsystem, so there is no `addRequirements`. A method that builds and returns a command
+like this is called a **command factory**. Each one matches the class methods you know:
+
+| Factory | The same as a command class that |
+|---|---|
+| `this.run(action)` | calls `action` in `execute()` and never finishes |
+| `this.runOnce(action)` | calls `action` in `initialize()` and finishes straight away |
+| `this.startRun(start, action)` | calls `start` in `initialize()`, then `action` in `execute()` |
+| `this.runEnd(action, end)` | calls `action` in `execute()` and `end` in `end()` |
+| `this.startEnd(start, end)` | calls `start` in `initialize()` and `end` in `end()` |
+
+You can add more to any command:
+
+| Method | What it adds |
+|---|---|
+| `.finallyDo(action)` | runs `action` when the command ends, like `end()` |
+| `.until(condition)` | ends the command once `condition`, a `BooleanSupplier`, returns `true` |
+| `.withName("Elevator.GoTo")` | the name you see in the logs; a class gets one from its class name |
+
+So `RunRoller` becomes one method in `Roller`:
+
+```java
+public Command runCommand() {
+  return this.runEnd(this::spin, this::stop).withName("Roller.Run");
+}
+```
+
+And `HoldElevator` and `MoveElevator` become two methods in `Elevator`:
+
+```java
+public Command hold() {
+  return this.run(this::driveToTarget).withName("Elevator.Hold");
+}
+
+public Command goTo(Distance height) {
+  return this.startRun(() -> this.setTarget(height), this::driveToTarget)
+      .withName("Elevator.GoTo");
+}
+```
+
+### Your turn
+
+Rewrite stages 1 and 2 this way, delete the `RunRoller`, `HoldElevator` and `MoveElevator` classes,
+and change `Robot` to use the factories:
+
+```java
+m_elevator.setDefaultCommand(m_elevator.hold());
+RobotModeTriggers.teleop().and(m_driverController.y()).whileTrue(
+    m_elevator.goTo(ElevatorConstants.MAX_HEIGHT));
+```
+
+**Done when:** the roller and the elevator behave exactly as before, and their graphs look the same.
+
+Command classes are still normal on real robots, and a big command with its own fields reads better as
+a class. From here on, though, these exercises write commands as factories.
+
 ## Stage 3: Intake
 
 The intake is a frame that swings up and down, with a roller at its end. Write it in
-`subsystems/intake/`. It is one subsystem with **two motors**: `Motors.intakeFrame()` and
+`subsystems/intake/Intake.java`. It is one subsystem with **two motors**: `Motors.intakeFrame()` and
 `Motors.intakeRoller()`.
 
 - The frame works like the elevator, but in radians: 0 is flat on the floor and the top of its travel
-  is upright. Give `Intake` a frame target and a `driveFrame()` method using
-  `IntakeConstants.FRAME_KP`, and write `HoldIntake` and `MoveIntake` commands like the elevator's.
-- The roller works like stage 1, at `IntakeConstants.ROLLER_VOLTAGE`: give `Intake` `spinRoller()`
-  and `stopRoller()`, and write a `SpinIntake` command.
-- Y (V) stows the frame upright at `FRAME_MAX_ANGLE`, A (Z) deploys it flat at `FRAME_MIN_ANGLE`,
-  and holding X (C) spins the roller.
+  is upright. Give `Intake` a frame target, a `driveFrame()` method using `IntakeConstants.FRAME_KP`,
+  and `hold()` and `goTo(Angle angle)` factories.
+- The roller works like stage 1, at `IntakeConstants.ROLLER_VOLTAGE`. Give `Intake` a
+  `spinRoller()` factory.
+- Make `hold()` the default command. Y (V) stows the frame upright at `FRAME_MAX_ANGLE`, A (Z) deploys
+  it flat at `FRAME_MIN_ANGLE`, and holding X (C) spins the roller.
 
 Wire it with `m_blockBot.trackIntake(m_intake::getFrameAngleRadians, m_intake::getRollerRadians);`
 and log `Intake/FrameTargetRadians`, `Intake/FramePositionRadians` and
 `Intake/RollerVelocityRadiansPerSecond`.
 
-There is a trap here. Every one of these commands uses the intake, and only one can use it at a time.
-When `SpinIntake` starts, `HoldIntake` stops, and nothing keeps the frame up. Try it and watch the
-frame drop. Then make `SpinIntake`'s `execute()` keep driving the frame to its target too.
+There is a trap here. Every one of these commands requires the intake, and only one can use it at a
+time. When `spinRoller()` starts, `hold()` stops, and nothing keeps the frame up. Try it and watch the
+frame drop. Then make `spinRoller()`'s lambda keep driving the frame to its target too.
 
 **Done when:** the frame swings to either end and stays there, and the roller spins without the frame
 moving.
 
 ## Stage 4: Hood
 
-The hood tilts up and down to aim. Write it in `subsystems/hood/`, with `Motors.hood()`.
+The hood tilts up and down to aim. Write it in `subsystems/hood/Hood.java`, with `Motors.hood()`.
 
 This is the elevator's pattern again, measured in radians: 0 is level, and `HoodConstants` holds the
 limits and `KP`. Gravity pulls the hood down, so with nothing holding it, it drops to its lower stop.
 
-- Write `HoldHood` and `MoveHood`, and make `HoldHood` the default command.
+- Write `hold()` and `goTo(Angle angle)`, and make `hold()` the default command.
 - Y (V) aims up to `HoodConstants.MAX_PITCH`; A (Z) aims down to `HoodConstants.MIN_PITCH`.
 - Wire it with `m_blockBot.trackHood(m_hood::getPitchRadians);` and log `Hood/TargetRadians` and
   `Hood/PositionRadians`.
@@ -330,10 +457,10 @@ limits and `KP`. Gravity pulls the hood down, so with nothing holding it, it dro
 
 ## Stage 5: Turret
 
-The turret turns the whole shooter around. Write it in `subsystems/turret/`, with `Motors.turret()`.
-Its angle is 0 facing forward and grows as it turns left.
+The turret turns the whole shooter around. Write it in `subsystems/turret/Turret.java`, with
+`Motors.turret()`. Its angle is 0 facing forward and grows as it turns left.
 
-Same pattern again, `HoldTurret` and `MoveTurret`, with `TurretConstants.KP`:
+Same pattern again, `hold()` and `goTo(Angle angle)`, with `TurretConstants.KP`:
 
 - X (C) turns it left to `TurretConstants.MAX_YAW`, B (X) turns it right to `TurretConstants.MIN_YAW`,
   and Y (V) brings it back to face forward, `Radians.of(0)`.
@@ -350,23 +477,6 @@ Two things to notice:
 
 **Done when:** the turret holds wherever you send it, and a full sweep from one end to the other
 never touches the elevator.
-
-## Optional: shorter commands
-
-By now you have written a lot of small command classes that look almost the same. WPILib can build
-simple commands for you, without a class. A subsystem's `this.run(...)` makes a command that requires
-the subsystem and runs your code every loop, like an `execute()`; `.finallyDo(...)` adds code for when
-it ends, like an `end()`. So the whole `RunRoller` class is the same as this method in `Roller`:
-
-```java
-public Command runCommand() {
-  return this.run(this::spin).finallyDo(this::stop).withName("Roller.Run");
-}
-```
-
-`withName` gives the command the name you see in the logs, which a class gets from its class name.
-Try rewriting one stage this way. If you prefer classes, keep them: both are normal on real robots,
-and the rest of these exercises work either way.
 
 ## Stage 6: Swerve drive
 
@@ -418,41 +528,39 @@ every loop. A `SwerveModuleState` is a wheel speed in metres per second plus an 
 Then write `subsystems/drive/Drive.java`, the subsystem: four modules, in the order above, and the
 gyro. Give it `setAllModules(SwerveModuleState state)`, which hands the same state to every module.
 
-The command that drives from the sticks is `DriveWithSticks`. It needs the controller, so its
-constructor takes the controller as well as the drive:
+The command that drives from the sticks is a factory in `Drive`. `Robot` builds it once, but it has
+to read the sticks every loop, so it takes the sticks as **suppliers**: ways to ask for their values
+later, as you saw in the pause after stage 2.
 
 ```java
-public class DriveWithSticks extends Command {
-  private final Drive m_drive;
-  private final CommandXboxController m_controller;
-
-  public DriveWithSticks(Drive drive, CommandXboxController controller) {
-    m_drive = drive;
-    m_controller = controller;
-    this.addRequirements(drive);
-  }
-
-  @Override
-  public void execute() {
-    double x = MathUtil.applyDeadband(-m_controller.getLeftY(), DriveConstants.STICK_DEADBAND);
-    double y = MathUtil.applyDeadband(-m_controller.getLeftX(), DriveConstants.STICK_DEADBAND);
-    double speed = Math.hypot(x, y) * DriveConstants.MAX_SPEED.in(MetersPerSecond);
-    Rotation2d angle = new Rotation2d(Math.atan2(y, x));
-    m_drive.setAllModules(new SwerveModuleState(speed, angle));
-  }
+// In Drive:
+public Command driveWithSticks(DoubleSupplier forwardStick, DoubleSupplier leftStick) {
+  return this.run(
+          () -> {
+            double x =
+                MathUtil.applyDeadband(forwardStick.getAsDouble(), DriveConstants.STICK_DEADBAND);
+            double y =
+                MathUtil.applyDeadband(leftStick.getAsDouble(), DriveConstants.STICK_DEADBAND);
+            double speed = Math.hypot(x, y) * DriveConstants.MAX_SPEED.in(MetersPerSecond);
+            Rotation2d angle = new Rotation2d(Math.atan2(y, x));
+            this.setAllModules(new SwerveModuleState(speed, angle));
+          })
+      .withName("Drive.WithSticks");
 }
+```
+
+In `Robot`, create `Drive` like the other mechanisms and make this its default command:
+
+```java
+m_drive.setDefaultCommand(
+    m_drive.driveWithSticks(
+        () -> -m_driverController.getLeftY(), () -> -m_driverController.getLeftX()));
 ```
 
 The minus signs are there because a stick reads negative when pushed forward and positive when
 pushed right, while the robot counts forward and left as positive. The **deadband** treats a stick
 that is nearly centred as exactly centred, so a real controller's slightly-off stick does not make
 the robot creep.
-
-In `Robot`, create `Drive` like the other mechanisms and make this its default command:
-
-```java
-m_drive.setDefaultCommand(new DriveWithSticks(m_drive, m_driverController));
-```
 
 `Drive` needs no `m_blockBot.track...` line: the 3D view already draws the drivetrain.
 
@@ -496,9 +604,10 @@ state.optimize(current);
 state.cosineScale(current);
 ```
 
-Change `DriveWithSticks.execute()` to build a `ChassisSpeeds` and call `m_drive.drive(...)`. Forward
-and sideways come from the left stick as before, times `MAX_SPEED`. Turning comes from the right stick:
-`-m_controller.getRightX()`, through the deadband, times `DriveConstants.MAX_ANGULAR_SPEED`.
+Give `driveWithSticks` a third supplier, `turnStick`, and make its lambda build a `ChassisSpeeds`
+and call `this.drive(...)`. Forward and sideways come from the left stick as before, times
+`MAX_SPEED`. Turning comes from the right stick: pass `() -> -m_driverController.getRightX()` from
+`Robot`, put it through the deadband, and multiply by `DriveConstants.MAX_ANGULAR_SPEED`.
 
 The keyboard needs a key for turning first. In the simulator window, open **DS → Keyboard 0
 Settings**, raise the axis **Count** to 5, and give **Axis 4** a Decrease and an Increase key. Q and E
@@ -516,12 +625,12 @@ faces. That is called **robot-relative** driving, and it is hard to drive that w
 In **field-relative** driving, forward on the stick always means away from you, whichever way the
 robot faces. To do that, the code needs to know which way the robot faces, and that is what the
 **gyro** measures. Give `Drive` a `getHeading()` method that returns
-`new Rotation2d(m_gyro.getYawRadians())`. Then, in `DriveWithSticks`, one call converts the stick's
-direction into the robot's:
+`new Rotation2d(m_gyro.getYawRadians())`. Then, in `driveWithSticks`'s lambda, one call converts the
+stick's direction into the robot's:
 
 ```java
 ChassisSpeeds speeds =
-    ChassisSpeeds.fromFieldRelativeSpeeds(forward, left, turn, m_drive.getHeading());
+    ChassisSpeeds.fromFieldRelativeSpeeds(forward, left, turn, this.getHeading());
 ```
 
 **Done when:** W always drives the robot the way it faced when the simulator started, however it has
@@ -580,9 +689,10 @@ explain each one:
 
 Then fix what you can:
 
-- **Accelerate gently.** A `SlewRateLimiter` limits how fast a value may change. Give
-  `DriveWithSticks` one per stick value, put each value through its limiter in `execute()`, and the
-  wheels never ask the carpet for more grip than it has.
+- **Accelerate gently.** A `SlewRateLimiter` limits how fast a value may change, and remembers the
+  last value to do it. Create one per stick value in `driveWithSticks`, before the `return`, and put
+  each value through its limiter inside the lambda. The lambda captures the limiters, so each drive
+  command keeps its own, and the wheels never ask the carpet for more grip than it has.
 - **Reset when you know.** `m_odometry.resetPosition(...)` sets the estimate to a pose you know is
   right, for example at the start of a match.
 
@@ -602,19 +712,25 @@ purpose and say why every time.
 - **Pressing a button does nothing.** The simulator must be enabled in Teleoperated, Keyboard 0 must
   be on Joystick[0], and the binding must be in `configureButtonBindings()`. Check you did not
   comment it out when you moved on to a new stage, and that you are pressing the right key: A is Z.
-- **It moves for an instant, then stops.** Either the voltage is set in `initialize()`, which runs
-  once, instead of `execute()`, which runs every loop; or `isFinished()` returns `true`.
-- **The motor keeps going after you let go.** The command's `end()` does not stop the motor.
+- **It moves for an instant, then stops.** The voltage is set once instead of every loop: in
+  `initialize()` instead of `execute()`, or with `this.runOnce(...)` instead of `this.run(...)`. Or
+  the command finishes by itself: `isFinished()` returns `true`.
+- **The motor keeps going after you let go.** Nothing stops it when the command ends: put the stop in
+  `end()`, or use `runEnd(...)` or `.finallyDo(...)`.
 - **The graph moves, but the 3D view does not.** You have not called `m_blockBot.track...` for it in
   `Robot`.
 - **The 3D view moves, but there is nothing to graph.** `periodic()` is not running. Call
   `this.register()` at the end of the subsystem's constructor.
-- **A mechanism falls when you let go.** It has no default command. Set its `Hold...` command with
+- **A mechanism falls when you let go.** It has no default command. Set its hold command with
   `setDefaultCommand` in `Robot`.
 - **It falls when another of its commands starts.** Only one command can use a subsystem at a time.
   The new command must keep holding what the old one held.
-- **Two mechanisms stop each other.** A command's `addRequirements` names a subsystem it does not
-  need. Each command should require only the subsystem it drives.
+- **Two mechanisms stop each other.** A command requires a subsystem it does not need: its
+  `addRequirements` names the wrong one, or a factory was called on the wrong subsystem
+  (`m_elevator.run(...)` requires the elevator). Each command should require only what it drives.
+- **The robot drives once and then ignores the sticks.** The stick was read once, when `Robot` built
+  the command, instead of every loop. Pass a supplier, `() -> -m_driverController.getLeftY()`, not
+  the value `-m_driverController.getLeftY()`.
 - **It stops when you disable, and does not come back.** That is expected: disabling stops every
   command. Default commands come back by themselves when you enable again. A button you keep holding
   comes back too, because `RobotModeTriggers.teleop()` is part of its binding.
@@ -632,7 +748,9 @@ everyone else's:
 - Fields start with `m_`: `m_motor`, `m_target`.
 - A class calls its own methods with `this.`: `this.register()`, `this.addRequirements(...)`.
 - Command classes are named for what they do, verb first: `RunRoller`, `MoveElevator`,
-  `HoldElevator`.
+  `HoldElevator`. Command factories are named the same way (`hold()`, `goTo(...)`,
+  `driveWithSticks(...)`) and given a `.withName("<Mechanism>.<What>")` so the logs say which
+  command ran.
 - Constants are `UPPER_SNAKE_CASE` and live in your `<Name>Constants`.
 - Physical values carry their unit (`Distance`, `Angle`, `Voltage`), and you turn them into plain
   numbers with `.in(Meters)` or `.in(Radians)` only where you hand them to a motor.
