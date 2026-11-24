@@ -111,7 +111,12 @@ bug. `src/test/java/first/robot/CarpetTest.java` pins those behaviours.
   (`KP * (target − position)`), with a hold command as the default and a move command that sets the
   target as it starts (`MoveElevator.initialize`, later `startRun` in `goTo(...)`). A pure P loop
   settles below target when gravity is simulated — that steady-state error is deliberate teaching
-  material, not a bug to paper over.
+  material, not a bug to paper over. Step 2b replaces the elevator's line with `PIDController`: `KI`
+  and `KD` ship at zero so the swap is invisible, then `KI` 20 shows windup (about 24 mm overshoot
+  to the middle) and `INTEGRAL_ZONE` cures it. Step 3b moves the intake frame to
+  `ProfiledPIDController` with `FRAME_MAX_VELOCITY`/`FRAME_MAX_ACCELERATION`, reset to the measured
+  state in each command's `startRun` start, and `FRAME_KP` raised from its plain-P value to about 20.
+  Those numbers were measured on the simulated plants; re-measure before changing the plant or gains.
 - Simulators enforce their limits (`Math.clamp` inside `update`); a command should still not ask for
   travel the mechanism does not have.
 - A mechanism posts its own state by overriding `periodic()`, and registers at the end of its

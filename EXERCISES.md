@@ -11,10 +11,10 @@ stage 1.
 The stages, in order:
 
 1. **Roller**: spin a motor while a button is held.
-2. **Elevator**: move to a height and stay there.
+2. **Elevator**: move to a height and stay there, then do it with WPILib's PID controller.
 
    Then a pause to learn lambdas, suppliers and a shorter way to write commands.
-3. **Intake**: two motors in one mechanism.
+3. **Intake**: two motors in one mechanism, and a smooth, planned move.
 4. **Hood**: the elevator's idea again, but tilting.
 5. **Turret**: turn the shooter around.
 6. **Swerve**: drive the robot around the field.
@@ -211,7 +211,10 @@ for that your code has to look.
 The elevator lifts a carriage up and down. Write it in `subsystems/elevator/`, and use
 `Motors.elevator()` for its motor.
 
-### Moving to a target
+This stage has two steps. First you write the control yourself, so you see how it works. Then you
+switch to WPILib's version, which can do more.
+
+### Step 2a: moving to a target
 
 To reach a height, the code must keep checking where the carriage is and correct for it. That is
 called **closed loop** control. The simplest version is one line:
@@ -252,7 +255,7 @@ public class Elevator implements Subsystem {
 `Distance` is a number with a unit attached, so you cannot mix up metres and inches by mistake.
 `m_target.in(Meters)` turns it into a plain number of metres, which is what the motor works in.
 
-### Two commands
+#### Two commands
 
 A mechanism that has to stay somewhere needs two commands:
 
@@ -271,7 +274,7 @@ m_elevator.setDefaultCommand(new HoldElevator(m_elevator));
 Let go of the button and `MoveElevator` ends. The elevator is free again, so `HoldElevator` starts
 and keeps the carriage at the target `MoveElevator` set.
 
-### Wire it up
+#### Wire it up
 
 - In `Robot`: `m_blockBot.trackCarriage(m_elevator::getHeightMeters);`
 - Bind Y (V on the keyboard) to `new MoveElevator(m_elevator, ElevatorConstants.MAX_HEIGHT)` and A (Z)
@@ -279,7 +282,7 @@ and keeps the carriage at the target `MoveElevator` set.
   roller.
 - Log `Elevator/TargetMeters` and `Elevator/PositionMeters` from `periodic()`.
 
-### Look closely
+#### Look closely
 
 Hold Y and graph the target against the position. The carriage stops a little **below** the top.
 
@@ -290,6 +293,55 @@ to the gap? Could anything else in the formula cancel gravity?
 
 **Done when:** the carriage rises smoothly, stops near the top, stays there when you let go, and you
 can explain the gap.
+
+### Step 2b: WPILib's PID controller
+
+Your one line is the **P** of **PID**, the controller almost every FRC mechanism uses. WPILib has it
+as a class, `PIDController`, with two more terms:
+
+- **I**, the **integral**, adds the error up over time. A gap that stays, like the one gravity leaves,
+  keeps growing it, until the motor pushes hard enough to close the gap. That is one answer to the
+  question above.
+- **D**, the **derivative**, reacts to how fast the error is changing. It calms a mechanism that
+  overshoots.
+
+Give `Elevator` a controller and use it in `driveToTarget()`:
+
+```java
+private final PIDController m_pid =
+    new PIDController(ElevatorConstants.KP, ElevatorConstants.KI, ElevatorConstants.KD);
+
+public void driveToTarget() {
+  m_motor.setVoltage(Volts.of(m_pid.calculate(m_motor.getPosition(), m_target.in(Meters))));
+}
+```
+
+`calculate(measurement, setpoint)` is your formula plus the two new terms. `KI` and `KD` start at
+zero in `ElevatorConstants`, so it gives exactly the voltage your line did. Make the swap first, and
+check that the graph has not changed.
+
+To see the integral work, you need a target away from the ends, where nothing stops the carriage.
+Bind B (X on the keyboard) to the middle:
+`new MoveElevator(m_elevator, ElevatorConstants.MAX_HEIGHT.div(2))`. Then, in `ElevatorConstants`:
+
+1. **Set `KI` to 20** and move from the bottom to the middle. The gap closes, but first the carriage
+   overshoots by a couple of centimetres. All the way up, the error was big, and the integral added
+   it all up; by the time the carriage arrives, the integral is still pushing hard. That is called
+   **windup**.
+2. **Add an integral zone.** In the constructor, call
+   `m_pid.setIZone(ElevatorConstants.INTEGRAL_ZONE.in(Meters))`. Now the integral only adds up error
+   once the carriage is close, so it fixes the last few millimetres without the overshoot.
+3. **Raise `KP`.** The integral takes care of the gap now, so you can make the move quicker: try 40,
+   then 60.
+4. **Leave `KD` at zero.** This elevator moves too slowly to overshoot on its own, so there is nothing
+   for D to calm. You will want it on fast mechanisms that bounce.
+
+Last, tell the controller how close is close enough, with
+`m_pid.setTolerance(ElevatorConstants.TOLERANCE.in(Meters))` in the constructor, and log
+`Elevator/AtTarget` from `m_pid.atSetpoint()`. It turns true when the carriage has arrived.
+
+**Done when:** the carriage reaches the middle and the top with at most a few millimetres of
+overshoot, settles within a millimetre of the target, and `Elevator/AtTarget` turns true.
 
 ## Pause: lambdas, suppliers and shorter commands
 
@@ -420,7 +472,10 @@ a class. From here on, though, these exercises write commands as factories.
 
 The intake is a frame that swings up and down, with a roller at its end. Write it in
 `subsystems/intake/Intake.java`. It is one subsystem with **two motors**: `Motors.intakeFrame()` and
-`Motors.intakeRoller()`.
+`Motors.intakeRoller()`. Like the elevator, it comes in two steps: first the frame moves the way the
+elevator did, then you make the move smooth.
+
+### Step 3a: frame and roller
 
 - The frame works like the elevator, but in radians: 0 is flat on the floor and the top of its travel
   is upright. Give `Intake` a frame target, a `driveFrame()` method using `IntakeConstants.FRAME_KP`,
@@ -440,6 +495,64 @@ frame drop. Then make `spinRoller()`'s lambda keep driving the frame to its targ
 
 **Done when:** the frame swings to either end and stays there, and the roller spins without the frame
 moving.
+
+### Step 3b: profiled motion
+
+Press Y and watch the frame. On the first loop the error is a quarter of a turn, so the controller
+pushes hard: the frame leaps up at about 8 radians per second and slams into the top. A real intake
+would bend.
+
+A **motion profile** plans the move instead. It speeds the frame up gently to a top speed, cruises,
+and slows down in time to stop at the end; graph its speed over time and you get a trapezoid. Every
+loop, the profile gives a **setpoint**: where the frame should be at this moment, part of the way
+there. The controller only has to chase the setpoint, so the error stays small the whole way. Where
+the move ends is called the **goal**.
+
+WPILib's `ProfiledPIDController` is a PID controller with a profile built in. Swap it in for your
+formula:
+
+```java
+private final ProfiledPIDController m_frameController =
+    new ProfiledPIDController(
+        IntakeConstants.FRAME_KP,
+        0,
+        0,
+        new TrapezoidProfile.Constraints(
+            IntakeConstants.FRAME_MAX_VELOCITY.in(RadiansPerSecond),
+            IntakeConstants.FRAME_MAX_ACCELERATION.in(RadiansPerSecondPerSecond)));
+
+private void driveFrame() {
+  m_frame.setVoltage(
+      Volts.of(m_frameController.calculate(m_frame.getPosition(), m_frameTarget.in(Radians))));
+}
+```
+
+The profile remembers its setpoint from loop to loop, and each move starts from there. So whenever a
+command that drives the frame starts, tell the profile where the frame really is:
+
+```java
+m_frameController.reset(m_frame.getPosition(), m_frame.getVelocity());
+```
+
+That belongs in the start part of `startRun(start, action)`, in `hold()`, `goTo(...)` and
+`spinRoller()`. Without it, the first move after a disable starts from where the setpoint was left,
+not from where the frame fell to, and the frame jumps.
+
+Log `Intake/FrameSetpointRadians` from `m_frameController.getSetpoint().position`, and graph it with
+the target and the position. The setpoint glides from one end to the other.
+
+The position will not keep up with it yet: with `FRAME_KP` still at its first value it trails by half
+a radian. The small error that a profile leaves only asks for a small voltage. But that small error
+is also why a much stiffer gain is safe now: raise `FRAME_KP` until the position follows the setpoint
+closely. Around 20 works.
+
+**Done when:** the frame swings to either end in about a second without slamming, the position
+follows the setpoint closely on the graph, and the roller still spins without moving the frame.
+
+**Stretch:** the position still trails a little, because gravity pulls on the frame and the
+controller only answers once an error has appeared. WPILib's `ArmFeedforward` works out the voltage
+gravity and the setpoint's speed will need before any error appears; add it to the controller's
+output.
 
 ## Stage 4: Hood
 
@@ -723,6 +836,9 @@ purpose and say why every time.
   `this.register()` at the end of the subsystem's constructor.
 - **A mechanism falls when you let go.** It has no default command. Set its hold command with
   `setDefaultCommand` in `Robot`.
+- **The intake frame jumps when you enable, or on its first move.** The motion profile still has
+  the setpoint it had before. Reset it to where the frame is, with `reset(...)`, as each command that
+  drives the frame starts.
 - **It falls when another of its commands starts.** Only one command can use a subsystem at a time.
   The new command must keep holding what the old one held.
 - **Two mechanisms stop each other.** A command requires a subsystem it does not need: its
