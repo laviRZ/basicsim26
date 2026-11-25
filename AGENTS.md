@@ -228,8 +228,11 @@ Translations are never committed: they exist only in the published site and, as 
 workflow's `docs-translations` build artifact.
 
 - `tools/translate_docs.py` splits each page at its `## ` headings and translates only sections whose
-  English changed, with `claude-opus-5-5` (adaptive thinking, effort `high`, server-side refusal
-  fallbacks). It caches by a hash of each English section in `docs/i18n/<lang>/<Page>.sections.json`
+  English changed, with `claude-haiku-5-5` (adaptive thinking, effort `high`; no server-side refusal
+  fallback exists for Haiku, so a declined section stops the run), and ends by printing its tokens
+  and an estimated cost from `PRICE_PER_MILLION`, which must change with `MODEL`. The cache is keyed
+  by English only, so changing the model does not retranslate sections already done. It caches by a
+  hash of each English section in `docs/i18n/<lang>/<Page>.sections.json`
   (gitignored, skipped by spotless), saving after every section; a section not translated yet shows
   in English. There is deliberately no glossary; the model gets the project, audience and "what the
   student does with this text" as context (`CONTEXT` in the script). A translation must keep code

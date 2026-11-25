@@ -37,8 +37,19 @@ SOURCES = ["README.md", "EXERCISES.md"]
 LANGUAGES = {"he": "Hebrew", "es": "Spanish"}
 I18N_DIR = ROOT / "docs" / "i18n"
 
-MODEL = "claude-opus-5-5"
+MODEL = "claude-haiku-5-5"
 MAX_ATTEMPTS = 3
+
+# What MODEL costs, in US dollars per million tokens, for the estimate printed at the end of a run
+# (the bill itself is on the Claude Console). These are the rates for prompts under 100K tokens,
+# which every request here is: one English page plus one translation. Update them with MODEL.
+PRICE_PER_MILLION = {
+    "input_tokens": 0.10,
+    "cache_creation_input_tokens": 0.125,  # 1.25 times input, for the 5-minute cache
+    "cache_read_input_tokens": 0.01,  # 0.1 times input
+    "output_tokens": 0.50,  # thinking is billed as output
+}
+USAGE = dict.fromkeys(PRICE_PER_MILLION, 0)
 
 NO_CREDENTIALS = (
     "No Claude API credentials. Set ANTHROPIC_API_KEY: on GitHub, add a repository secret of that "
@@ -211,17 +222,14 @@ def translate_section(
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            with client.beta.messages.stream(
+            # Haiku has no server-side fallback model: a declined section stops the run.
+            with client.messages.stream(
                 model=MODEL,
                 max_tokens=64000,
                 system=system,
                 messages=messages,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "high"},
-                # If a safety classifier declines, the API reruns the request on a fallback
-                # model chosen for that kind of decline.
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
             ) as stream:
                 response = stream.get_final_message()
         except anthropic.RateLimitError as error:
@@ -236,6 +244,8 @@ def translate_section(
                 raise
             sys.exit(NO_CREDENTIALS)
 
+        for kind in USAGE:
+            USAGE[kind] += getattr(response.usage, kind) or 0
         if response.stop_reason == "refusal":
             sys.exit(f"Claude declined to translate a section into {LANGUAGES[language]}.")
         if response.stop_reason == "max_tokens":
@@ -328,6 +338,23 @@ def main() -> None:
         except anthropic.AnthropicError as error:
             sys.exit(f"{NO_CREDENTIALS} ({error})")
 
+    try:
+        translate_all(client, fake=args.fake)
+    finally:
+        # Also when the run stops early: what was spent until then is still spent.
+        if client is not None:
+            print_cost()
+
+
+def print_cost() -> None:
+    """Prints the tokens this run used and what they cost, by PRICE_PER_MILLION."""
+    dollars = sum(USAGE[kind] * PRICE_PER_MILLION[kind] for kind in USAGE) / 1_000_000
+    tokens = ", ".join(f"{count:,} {kind.removesuffix('_tokens')}" for kind, count in USAGE.items())
+    print(f"Tokens: {tokens}.")
+    print(f"Estimated cost with {MODEL}: ${dollars:.4f}")
+
+
+def translate_all(client, fake: bool) -> None:
     for language, name in LANGUAGES.items():
         for source in SOURCES:
             document = (ROOT / source).read_text(encoding="utf-8")
@@ -340,7 +367,7 @@ def main() -> None:
             save(language, source, sections, translated)
             for i in todo:
                 print(f"  {first_line(sections[i])}")
-                if args.fake:
+                if fake:
                     translated[i] = fake_section(language, sections[i])
                 else:
                     so_far = "".join(
